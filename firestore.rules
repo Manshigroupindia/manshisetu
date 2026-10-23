@@ -1,0 +1,172 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isDirector() {
+      return isAuthenticated() &&
+        request.auth.token.email.lower() == 'devenjhaofficial@gmail.com';
+    }
+
+    function getCallerEmployeeId() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.employeeId;
+    }
+
+    function isOwnerStaff(employeeId) {
+      return isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         getCallerEmployeeId() == employeeId)
+      );
+    }
+
+    // 1. Users authorization profiles (users/{uid})
+    match /users/{uid} {
+      allow read: if isAuthenticated() && (request.auth.uid == uid || isDirector());
+      allow write: if isDirector();
+    }
+
+    // 2. Staff directory records (staff/{employeeId})
+    match /staff/{employeeId} {
+      allow read: if isAuthenticated() && (isDirector() || isOwnerStaff(employeeId));
+      allow create, delete: if isDirector();
+      allow update: if isDirector() || (
+        isOwnerStaff(employeeId) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['alternateContact', 'address', 'updatedAt'])
+      );
+    }
+
+    // 3. Work assignments & task delegations (workAssignments/{taskId})
+    match /workAssignments/{taskId} {
+      allow read: if isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         resource.data.staffId == getCallerEmployeeId())
+      );
+      allow create, delete: if isDirector();
+      allow update: if isDirector() || (
+        isAuthenticated() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        resource.data.staffId == getCallerEmployeeId() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'staffProgressNotes', 'staffCompletedNotes', 'completedAt', 'updatedAt'])
+      );
+    }
+
+    // 4. GPS Attendance sessions (attendanceSessions/{sessionId})
+    match /attendanceSessions/{sessionId} {
+      allow read: if isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         resource.data.staffId == getCallerEmployeeId())
+      );
+      allow create: if isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         request.resource.data.staffId == getCallerEmployeeId())
+      );
+      allow update: if isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         resource.data.staffId == getCallerEmployeeId())
+      );
+      allow delete: if isDirector();
+    }
+
+    // 5. Expense claims & receipts (expenses/{expenseId})
+    match /expenses/{expenseId} {
+      allow read: if isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         resource.data.staffId == getCallerEmployeeId())
+      );
+      allow create: if isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         request.resource.data.staffId == getCallerEmployeeId())
+      );
+      allow update, delete: if isDirector();
+    }
+
+    // 6. Salary records (salaryRecords/{salaryRecordId})
+    match /salaryRecords/{salaryRecordId} {
+      allow read: if isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         resource.data.staffId == getCallerEmployeeId())
+      );
+      allow write: if isDirector();
+    }
+
+    // 7. Salary advances (salaryAdvances/{advanceId})
+    match /salaryAdvances/{advanceId} {
+      allow read: if isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         resource.data.staffId == getCallerEmployeeId())
+      );
+      allow write: if isDirector();
+    }
+
+    // 8. Notices & Circulars (notices/{noticeId})
+    match /notices/{noticeId} {
+      allow read: if isAuthenticated();
+      allow write: if isDirector();
+    }
+
+    // 9. Calendar Holidays (holidays/{holidayId})
+    match /holidays/{holidayId} {
+      allow read: if isAuthenticated();
+      allow write: if isDirector();
+    }
+
+    // 10. Office Events (officeEvents/{eventId})
+    match /officeEvents/{eventId} {
+      allow read: if isAuthenticated();
+      allow write: if isDirector();
+    }
+
+    // 10b. Legacy Events (events/{eventId}) - migration cleanup
+    match /events/{eventId} {
+      allow read, write: if isDirector();
+    }
+
+    // 11. Company Resources (companyResources/{resourceId})
+    match /companyResources/{resourceId} {
+      allow read: if isAuthenticated();
+      allow write: if isDirector();
+    }
+
+    // 11b. Legacy Resources (resources/{resourceId}) - migration cleanup
+    match /resources/{resourceId} {
+      allow read, write: if isDirector();
+    }
+
+    // 12. Company Settings (companySettings/{settingId})
+    match /companySettings/{settingId} {
+      allow read: if isAuthenticated();
+      allow write: if isDirector();
+    }
+
+    // 13. Audit logs (auditLogs/{logId})
+    match /auditLogs/{logId} {
+      allow read: if isDirector();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+
+    // 14. System Metadata (systemMetadata/{docId})
+    match /systemMetadata/{docId} {
+      allow read, write: if isDirector();
+    }
+
+    // 15. Default Deny on all unmatched paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
