@@ -6,6 +6,7 @@ import {
   GeoErrorDetails,
   GPSCoordinates,
 } from '../utils/geoUtils';
+import { getCanonicalEmployeeId } from '../utils/firestoreUtils';
 import { useApp } from '../context/AppContext';
 
 export interface UseAttendanceLocationReturn {
@@ -19,7 +20,7 @@ export interface UseAttendanceLocationReturn {
 }
 
 export function useAttendanceLocation(): UseAttendanceLocationReturn {
-  const { currentStaff, recordDutyOn, recordDutyOff, showToast } = useApp();
+  const { currentStaff, recordDutyOn, recordDutyOff, showToast, auth } = useApp();
 
   const [isLocating, setIsLocating] = useState(false);
   const [locatingMessage, setLocatingMessage] = useState('');
@@ -46,14 +47,14 @@ export function useAttendanceLocation(): UseAttendanceLocationReturn {
 
   const executeDutyAction = useCallback(
     async (actionType: 'duty_on' | 'duty_off'): Promise<boolean> => {
-      if (!currentStaff) {
+      if (!currentStaff && !auth.isAuthenticated) {
         showToast('Staff profile not found. Please log in again.', 'error');
         return false;
       }
 
       // Prevent duplicate requests while an active request is in-flight
       if (isExecutingRef.current) {
-        showToast('GPS location acquisition already in progress. Please wait...', 'info');
+        showToast('Attendance operation already in progress. Please wait...', 'info');
         return false;
       }
 
@@ -71,8 +72,12 @@ export function useAttendanceLocation(): UseAttendanceLocationReturn {
       setGeoError(null);
       setLastAction(actionType);
 
+      // ==========================================
+      // STAGE 1: GPS Location Capture
+      // ==========================================
+      let coords: GPSCoordinates;
       try {
-        const coords: GPSCoordinates = await acquireRobustGPSCoordinates({
+        coords = await acquireRobustGPSCoordinates({
           onProgress: (msg) => {
             if (!controller.signal.aborted) {
               setLocatingMessage(msg);
@@ -80,23 +85,73 @@ export function useAttendanceLocation(): UseAttendanceLocationReturn {
           },
           signal: controller.signal,
         });
-
-        // Ensure not aborted before updating database
+      } catch (geoErr: any) {
         if (controller.signal.aborted) {
           return false;
         }
 
-        const effectiveStaffId = currentStaff.employeeId || currentStaff.id;
+        const details: GeoErrorDetails = geoErr?.kind
+          ? (geoErr as GeoErrorDetails)
+          : {
+              kind: 'UNKNOWN',
+              title: 'Location Acquisition Failed',
+              message: geoErr?.message || 'Failed to capture device GPS location.',
+              guidance: 'Please check device location settings, ensure Wi-Fi is enabled, and click "Retry Location".',
+              canRetry: true,
+              technicalMessage: geoErr?.message,
+            };
 
-        // Apply location validation and record duty
+        setGeoError(details);
+        showToast(`${details.title}: ${details.message}`, 'error');
+        return false;
+      } finally {
+        if (controller.signal.aborted) {
+          isExecutingRef.current = false;
+          setIsLocating(false);
+          setLocatingMessage('');
+        }
+      }
+
+      if (controller.signal.aborted) {
+        return false;
+      }
+
+      // ==========================================
+      // STAGE 2: Firestore Attendance Write
+      // GPS Succeeded! Any failure here is a Database / Security issue.
+      // ==========================================
+      setLocatingMessage('Saving attendance to cloud database...');
+
+      const canonicalStaffId = getCanonicalEmployeeId(
+        currentStaff?.employeeId,
+        auth.employeeId || currentStaff?.id
+      );
+
+      if (!canonicalStaffId) {
+        const details: GeoErrorDetails = {
+          kind: 'UNKNOWN',
+          title: 'Staff Identity Unresolved',
+          message: 'Unable to resolve your canonical Employee ID for attendance.',
+          guidance: 'Please log out and sign back in to refresh your employee credentials.',
+          canRetry: false,
+        };
+        setGeoError(details);
+        showToast('Staff profile missing canonical Employee ID. Please log in again.', 'error');
+        isExecutingRef.current = false;
+        setIsLocating(false);
+        setLocatingMessage('');
+        return false;
+      }
+
+      try {
         if (actionType === 'duty_on') {
-          await recordDutyOn(effectiveStaffId, {
+          await recordDutyOn(canonicalStaffId, {
             latitude: coords.latitude,
             longitude: coords.longitude,
             accuracy: coords.accuracy,
           });
         } else {
-          await recordDutyOff(effectiveStaffId, {
+          await recordDutyOff(canonicalStaffId, {
             latitude: coords.latitude,
             longitude: coords.longitude,
             accuracy: coords.accuracy,
@@ -105,26 +160,34 @@ export function useAttendanceLocation(): UseAttendanceLocationReturn {
 
         setGeoError(null);
         return true;
-      } catch (err: any) {
+      } catch (dbErr: any) {
         if (controller.signal.aborted) {
           return false;
         }
 
-        const isDatabaseError = !err?.kind && Boolean(err?.code || err?.message);
-        const details: GeoErrorDetails = err?.kind
-          ? (err as GeoErrorDetails)
-          : {
-              kind: 'UNKNOWN',
-              title: isDatabaseError ? 'Attendance Record Failed' : 'Location Acquisition Failed',
-              message: err?.message || 'Failed to record attendance session.',
-              guidance:
-                'Please verify your internet connection, ensure location access is enabled, and click "Retry Location".',
-              canRetry: true,
-              technicalMessage: err?.message,
-            };
+        const rawCode = (dbErr?.code || '').toString();
+        const rawMsg = (dbErr?.message || '').toString();
+        const isPermission =
+          rawCode === 'permission-denied' ||
+          rawCode.includes('permission') ||
+          rawMsg.toLowerCase().includes('permission') ||
+          rawMsg.toLowerCase().includes('insufficient permissions');
+
+        const details: GeoErrorDetails = {
+          kind: isPermission ? 'PERMISSION_DENIED' : 'UNKNOWN',
+          title: 'Attendance could not be saved',
+          message: isPermission
+            ? `Firebase permission denied [${rawCode || 'permission-denied'}]: ${rawMsg || 'Missing or insufficient permissions.'}`
+            : `Database error [${rawCode || 'firestore/error'}]: ${rawMsg || 'Failed to save attendance record to Firestore.'}`,
+          guidance: isPermission
+            ? `Your GPS position was captured successfully (±${Math.round(coords.accuracy)}m), but Firestore rejected the database write. This is a database permission issue, not a GPS issue. Please ensure your employee account (${canonicalStaffId}) is registered in Firestore users with matching employeeId, or contact Administration.`
+            : `Your GPS position was captured successfully (±${Math.round(coords.accuracy)}m), but persisting to Firestore failed. Please check your internet connection and try saving again.`,
+          canRetry: !isPermission,
+          technicalMessage: `Firestore write error: [${rawCode}]: ${rawMsg}`,
+        };
 
         setGeoError(details);
-        showToast(`${details.title}: ${details.message}`, 'error');
+        showToast(`Attendance could not be saved: ${rawMsg || rawCode}`, 'error');
         return false;
       } finally {
         if (abortControllerRef.current === controller) {
@@ -135,7 +198,7 @@ export function useAttendanceLocation(): UseAttendanceLocationReturn {
         setLocatingMessage('');
       }
     },
-    [currentStaff, recordDutyOn, recordDutyOff, showToast]
+    [currentStaff, auth, recordDutyOn, recordDutyOff, showToast]
   );
 
   const retryLocation = useCallback(async (): Promise<boolean> => {

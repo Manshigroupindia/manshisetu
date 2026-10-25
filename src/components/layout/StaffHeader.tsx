@@ -19,6 +19,7 @@ import { useApp } from '../../context/AppContext';
 import { DigitalClock } from '../common/DigitalClock';
 import { Link, useNavigate } from 'react-router-dom';
 import { getTodayDateString } from '../../utils/dateUtils';
+import { getCanonicalEmployeeId } from '../../utils/firestoreUtils';
 
 interface StaffHeaderProps {
   onToggleMobileMenu: () => void;
@@ -52,8 +53,13 @@ export const StaffHeader: React.FC<StaffHeaderProps> = ({ onToggleMobileMenu }) 
 
   // Today's attendance duty status
   const todayStr = getTodayDateString();
+  const myCanonicalId = getCanonicalEmployeeId(currentStaff?.employeeId, currentStaff?.id);
+  const isMyStaffId = (staffId?: string) =>
+    (myCanonicalId && getCanonicalEmployeeId(staffId) === myCanonicalId) ||
+    staffId === currentStaff?.id ||
+    staffId === currentStaff?.employeeId;
   const todayAtt = attendance.find(
-    (a) => a.staffId === currentStaff?.id && a.date === todayStr
+    (a) => isMyStaffId(a.staffId) && a.date === todayStr
   );
   const dutyStatus = todayAtt?.dutyStatus || 'duty_off';
 

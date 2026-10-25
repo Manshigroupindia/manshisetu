@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { getTodayDateString } from '../../utils/dateUtils';
+import { getCanonicalEmployeeId } from '../../utils/firestoreUtils';
 
 interface StaffSidebarProps {
   mobileOpen: boolean;
@@ -30,28 +31,37 @@ export const StaffSidebar: React.FC<StaffSidebarProps> = ({ mobileOpen, setMobil
   const navigate = useNavigate();
 
   // Employee-specific badge counts
+  const myCanonicalId = getCanonicalEmployeeId(currentStaff?.employeeId, currentStaff?.id);
   const myEmployeeId = currentStaff?.employeeId;
+
+  const isMyStaffId = (staffId?: string) =>
+    (myCanonicalId && getCanonicalEmployeeId(staffId) === myCanonicalId) ||
+    staffId === currentStaff?.id ||
+    staffId === currentStaff?.employeeId;
+
   const myPendingTasksCount = work.filter(
     (w) =>
-      w.staffId === myEmployeeId &&
+      isMyStaffId(w.staffId) &&
       (w.status === 'pending' || w.status === 'in_progress' || w.status === 'overdue')
   ).length;
 
   const myPendingExpensesCount = expenses.filter(
-    (e) => e.staffId === myEmployeeId && e.approvalStatus === 'pending'
+    (e) => isMyStaffId(e.staffId) && e.approvalStatus === 'pending'
   ).length;
 
   const myPublishedNoticesCount = notices.filter(
     (n) =>
       n.status === 'published' &&
       (n.targetAudience === 'all' ||
-        (n.targetAudience === 'specific' && n.targetStaffIds?.includes(myEmployeeId || '')))
+        (n.targetAudience === 'specific' &&
+          (n.targetStaffIds?.includes(myEmployeeId || '') ||
+            (myCanonicalId && n.targetStaffIds?.some((id) => getCanonicalEmployeeId(id) === myCanonicalId)))))
   ).length;
 
   // Today's attendance duty status
   const todayStr = getTodayDateString();
   const todayAtt = attendance.find(
-    (a) => a.staffId === currentStaff?.id && a.date === todayStr
+    (a) => isMyStaffId(a.staffId) && a.date === todayStr
   );
   const dutyStatus = todayAtt?.dutyStatus || 'duty_off';
 

@@ -25,6 +25,7 @@ import {
   computeSessionDuration,
 } from '../utils/geoUtils';
 import { isDemoAttendance } from '../utils/demoDataFilter';
+import { sanitizeFirestorePayload, getCanonicalEmployeeId } from '../utils/firestoreUtils';
 
 export class AttendanceService {
   /**
@@ -41,15 +42,16 @@ export class AttendanceService {
   /**
    * Record Duty On (Check-in) with GPS coordinates and Geofence Verification
    */
-  /**
-   * Record Duty On (Check-in) with GPS coordinates and Geofence Verification
-   */
   async recordDutyOn(
     staffId: string,
     coords: { latitude: number; longitude: number; accuracy: number },
     settings: CompanySettings
   ): Promise<AttendanceRecord> {
-    const cleanStaffId = staffId.trim();
+    const cleanStaffId = getCanonicalEmployeeId(staffId);
+    if (!cleanStaffId) {
+      throw new Error('Invalid Staff ID: Canonical Employee ID could not be resolved.');
+    }
+
     const todayStr = this.getTodayDateString();
     const office = settings.officeGeofence || {
       latitude: 28.6289,
@@ -89,8 +91,16 @@ export class AttendanceService {
     // Check if session already exists for today
     const recordId = `att-${cleanStaffId}-${todayStr}`;
     const docRef = doc(db, 'attendanceSessions', recordId);
-    const existingSnap = await getDoc(docRef);
-    const existing = existingSnap.exists() ? (existingSnap.data() as AttendanceRecord) : null;
+
+    let existing: AttendanceRecord | null = null;
+    try {
+      const existingSnap = await getDoc(docRef);
+      if (existingSnap.exists()) {
+        existing = existingSnap.data() as AttendanceRecord;
+      }
+    } catch (readErr: any) {
+      console.warn('Pre-check for existing attendance skipped:', readErr?.message || readErr);
+    }
 
     if (existing && existing.dutyStatus === 'duty_on') {
       throw new Error(`Active Duty On session already exists for today (checked in at ${existing.checkIn}).`);
@@ -111,11 +121,13 @@ export class AttendanceService {
       notes: 'Duty On recorded via GPS Geolocation',
     };
 
-    await setDoc(docRef, {
+    const sanitizedPayload = sanitizeFirestorePayload({
       ...newRecord,
-      createdAt: serverTimestamp(),
+      createdAt: (existing as any)?.createdAt || serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+
+    await setDoc(docRef, sanitizedPayload, { merge: true });
 
     return newRecord;
   }
@@ -129,7 +141,11 @@ export class AttendanceService {
     settings: CompanySettings,
     fallbackExisting?: Partial<AttendanceRecord> | null
   ): Promise<AttendanceRecord> {
-    const cleanStaffId = staffId.trim();
+    const cleanStaffId = getCanonicalEmployeeId(staffId);
+    if (!cleanStaffId) {
+      throw new Error('Invalid Staff ID: Canonical Employee ID could not be resolved.');
+    }
+
     const todayStr = this.getTodayDateString();
     const office = settings.officeGeofence || {
       latitude: 28.6289,
@@ -168,8 +184,17 @@ export class AttendanceService {
 
     const recordId = `att-${cleanStaffId}-${todayStr}`;
     const docRef = doc(db, 'attendanceSessions', recordId);
-    const existingSnap = await getDoc(docRef);
-    const existingFromDb = existingSnap.exists() ? (existingSnap.data() as AttendanceRecord) : null;
+
+    let existingFromDb: AttendanceRecord | null = null;
+    try {
+      const existingSnap = await getDoc(docRef);
+      if (existingSnap.exists()) {
+        existingFromDb = existingSnap.data() as AttendanceRecord;
+      }
+    } catch (readErr: any) {
+      console.warn('Pre-check for existing attendance skipped:', readErr?.message || readErr);
+    }
+
     const existing = existingFromDb || fallbackExisting || null;
 
     const startTimestamp = existing?.checkInTimestamp || isoString;
@@ -201,14 +226,12 @@ export class AttendanceService {
         : 'Duty Off recorded via GPS Geolocation',
     };
 
-    await setDoc(
-      docRef,
-      {
-        ...updatedRecord,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    const sanitizedPayload = sanitizeFirestorePayload({
+      ...updatedRecord,
+      updatedAt: serverTimestamp(),
+    });
+
+    await setDoc(docRef, sanitizedPayload, { merge: true });
 
     return updatedRecord;
   }

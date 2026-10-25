@@ -29,6 +29,7 @@ import { Modal } from '../components/common/Modal';
 import { getDaysInMonthArray, isSunday } from '../utils/salaryCalculator';
 import { formatDistance, getGoogleMapsUrl, getGoogleMapsEmbedUrl } from '../utils/geoUtils';
 import { getTodayDateString, getCurrentMonthString } from '../utils/dateUtils';
+import { getCanonicalEmployeeId } from '../utils/firestoreUtils';
 import { EmptyState } from '../components/common/EmptyState';
 import {
   ResponsiveContainer,
@@ -146,7 +147,12 @@ export const AttendancePage: React.FC = () => {
 
   // Calculate detailed attendance statistics for a single staff member
   const getStaffMonthStats = (sId: string) => {
-    const staffRecords = monthRecords.filter((r) => r.staffId === sId);
+    const canonicalId = getCanonicalEmployeeId(sId);
+    const staffRecords = monthRecords.filter(
+      (r) =>
+        r.staffId === sId ||
+        (canonicalId && getCanonicalEmployeeId(r.staffId) === canonicalId)
+    );
     const recordMap = new Map<string, AttendanceRecord>();
     staffRecords.forEach((r) => recordMap.set(r.date, r));
 
@@ -228,8 +234,12 @@ export const AttendancePage: React.FC = () => {
 
   // Handle open Edit Record for a specific date & staff
   const handleOpenEditRecord = (staffId: string, dateStr: string) => {
+    const canonicalId = getCanonicalEmployeeId(staffId);
     const existing = attendance.find(
-      (r) => r.staffId === staffId && r.date === dateStr
+      (r) =>
+        (r.staffId === staffId ||
+          (canonicalId && getCanonicalEmployeeId(r.staffId) === canonicalId)) &&
+        r.date === dateStr
     );
     setEditTargetStaffId(staffId);
     setEditTargetDate(dateStr);
@@ -252,9 +262,10 @@ export const AttendancePage: React.FC = () => {
   // Submit edit record
   const handleSaveAttendanceRecord = (e: React.FormEvent) => {
     e.preventDefault();
+    const canonicalStaffId = getCanonicalEmployeeId(editTargetStaffId) || editTargetStaffId;
     const updatedRecord: AttendanceRecord = {
-      id: `att-${editTargetStaffId}-${editTargetDate}`,
-      staffId: editTargetStaffId,
+      id: `att-${canonicalStaffId}-${editTargetDate}`,
+      staffId: canonicalStaffId,
       date: editTargetDate,
       status: editStatus,
       checkIn: editStatus === 'present' || editStatus === 'half_day' ? (editCheckIn.trim() || undefined) : undefined,
@@ -748,7 +759,13 @@ export const AttendancePage: React.FC = () => {
                     </tr>
                   ) : (
                     monthRecords.map((rec) => {
-                    const emp = staff.find((s) => s.id === rec.staffId || s.employeeId === rec.staffId);
+                    const emp = staff.find(
+                      (s) =>
+                        s.id === rec.staffId ||
+                        s.employeeId === rec.staffId ||
+                        (rec.staffId && getCanonicalEmployeeId(s.employeeId) === getCanonicalEmployeeId(rec.staffId)) ||
+                        (rec.staffId && getCanonicalEmployeeId(s.id) === getCanonicalEmployeeId(rec.staffId))
+                    );
                     const checkInLoc = rec.checkInLocation;
                     const checkOutLoc = rec.checkOutLocation;
                     const checkInDist = rec.checkInDistanceMeters;

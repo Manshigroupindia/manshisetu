@@ -19,11 +19,31 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.employeeId;
     }
 
+    // Helper to match caller's employee ID against attendance / assignment / expense staffId
+    // Supports canonical ID (e.g. MGS-101), document prefix (staff-MGS-101), case-insensitivity, and auth.uid
+    function isMatchingCallerStaff(staffId) {
+      return isAuthenticated() && (
+        isDirector() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          staffId == getCallerEmployeeId() ||
+          staffId.lower() == getCallerEmployeeId().lower() ||
+          staffId == ('staff-' + getCallerEmployeeId()) ||
+          staffId.lower() == ('staff-' + getCallerEmployeeId().lower()) ||
+          ('staff-' + staffId.lower()) == getCallerEmployeeId().lower() ||
+          staffId == request.auth.uid
+        ))
+      );
+    }
+
     function isOwnerStaff(employeeId) {
       return isAuthenticated() && (
         isDirector() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         getCallerEmployeeId() == employeeId)
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
+          getCallerEmployeeId() == employeeId ||
+          getCallerEmployeeId().lower() == employeeId.lower() ||
+          ('staff-' + getCallerEmployeeId().lower()) == employeeId.lower() ||
+          getCallerEmployeeId().lower() == ('staff-' + employeeId.lower())
+        ))
       );
     }
 
@@ -47,34 +67,36 @@ service cloud.firestore {
     match /workAssignments/{taskId} {
       allow read: if isAuthenticated() && (
         isDirector() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         resource.data.staffId == getCallerEmployeeId())
+        isMatchingCallerStaff(resource.data.staffId)
       );
       allow create, delete: if isDirector();
       allow update: if isDirector() || (
         isAuthenticated() &&
-        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-        resource.data.staffId == getCallerEmployeeId() &&
+        isMatchingCallerStaff(resource.data.staffId) &&
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'staffProgressNotes', 'staffCompletedNotes', 'completedAt', 'updatedAt'])
       );
     }
 
     // 4. GPS Attendance sessions (attendanceSessions/{sessionId})
     match /attendanceSessions/{sessionId} {
+      // allow read permits reading an existing record owned by caller, or checking non-existent record (resource == null)
       allow read: if isAuthenticated() && (
         isDirector() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         (resource.data.staffId == getCallerEmployeeId() || resource.data.staffId == request.auth.uid))
+        resource == null ||
+        isMatchingCallerStaff(resource.data.staffId)
       );
+      // allow create guarantees employee can only create records with their own canonical employeeId or uid
       allow create: if isAuthenticated() && (
         isDirector() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         (request.resource.data.staffId == getCallerEmployeeId() || request.resource.data.staffId == request.auth.uid))
+        isMatchingCallerStaff(request.resource.data.staffId)
       );
+      // allow update guarantees employee can only update their own record and cannot reassign staffId
       allow update: if isAuthenticated() && (
         isDirector() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         (resource.data.staffId == getCallerEmployeeId() || resource.data.staffId == request.auth.uid))
+        (
+          isMatchingCallerStaff(resource.data.staffId) &&
+          isMatchingCallerStaff(request.resource.data.staffId)
+        )
       );
       allow delete: if isDirector();
     }
@@ -83,13 +105,11 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read: if isAuthenticated() && (
         isDirector() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         resource.data.staffId == getCallerEmployeeId())
+        isMatchingCallerStaff(resource.data.staffId)
       );
       allow create: if isAuthenticated() && (
         isDirector() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         request.resource.data.staffId == getCallerEmployeeId())
+        isMatchingCallerStaff(request.resource.data.staffId)
       );
       allow update, delete: if isDirector();
     }
@@ -98,8 +118,7 @@ service cloud.firestore {
     match /salaryRecords/{salaryRecordId} {
       allow read: if isAuthenticated() && (
         isDirector() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         resource.data.staffId == getCallerEmployeeId())
+        isMatchingCallerStaff(resource.data.staffId)
       );
       allow write: if isDirector();
     }
@@ -108,8 +127,7 @@ service cloud.firestore {
     match /salaryAdvances/{advanceId} {
       allow read: if isAuthenticated() && (
         isDirector() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
-         resource.data.staffId == getCallerEmployeeId())
+        isMatchingCallerStaff(resource.data.staffId)
       );
       allow write: if isDirector();
     }

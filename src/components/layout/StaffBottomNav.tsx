@@ -9,18 +9,24 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { getTodayDateString } from '../../utils/dateUtils';
+import { getCanonicalEmployeeId } from '../../utils/firestoreUtils';
 
 export const StaffBottomNav: React.FC = () => {
   const { currentStaff, work, attendance } = useApp();
 
-  const myEmployeeId = currentStaff?.employeeId;
+  const myCanonicalId = getCanonicalEmployeeId(currentStaff?.employeeId, currentStaff?.id);
+  const isMyStaffId = (staffId?: string) =>
+    (myCanonicalId && getCanonicalEmployeeId(staffId) === myCanonicalId) ||
+    staffId === currentStaff?.id ||
+    staffId === currentStaff?.employeeId;
+
   const pendingTasks = work.filter(
-    (w) => w.staffId === myEmployeeId && (w.status === 'pending' || w.status === 'in_progress')
+    (w) => isMyStaffId(w.staffId) && (w.status === 'pending' || w.status === 'in_progress')
   ).length;
 
   const todayStr = getTodayDateString();
   const todayAtt = attendance.find(
-    (a) => a.staffId === currentStaff?.id && a.date === todayStr
+    (a) => isMyStaffId(a.staffId) && a.date === todayStr
   );
   const isDutyOn = todayAtt?.dutyStatus === 'duty_on';
 

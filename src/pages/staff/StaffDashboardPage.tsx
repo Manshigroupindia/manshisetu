@@ -27,6 +27,7 @@ import { formatDistance, getGoogleMapsUrl, getGoogleMapsEmbedUrl } from '../../u
 import { getTodayDateString, getCurrentMonthString } from '../../utils/dateUtils';
 import { useAttendanceLocation } from '../../hooks/useAttendanceLocation';
 import { LocationErrorBanner } from '../../components/common/LocationErrorBanner';
+import { getCanonicalEmployeeId } from '../../utils/firestoreUtils';
 
 export const StaffDashboardPage: React.FC = () => {
   const {
@@ -70,21 +71,27 @@ export const StaffDashboardPage: React.FC = () => {
 
   const todayStr = getTodayDateString();
   const currentMonthStr = getCurrentMonthString();
+  const myCanonicalId = getCanonicalEmployeeId(currentStaff?.employeeId, currentStaff?.id);
   const myEmployeeId = currentStaff?.employeeId;
+
+  const isMyRecord = (staffId?: string) =>
+    (myCanonicalId && getCanonicalEmployeeId(staffId) === myCanonicalId) ||
+    staffId === currentStaff?.employeeId ||
+    staffId === currentStaff?.id;
 
   // Today's attendance session for this staff
   const todayRecord = attendance.find(
-    (a) => (a.staffId === currentStaff?.employeeId || a.staffId === currentStaff?.id) && a.date === todayStr
+    (a) => isMyRecord(a.staffId) && a.date === todayStr
   );
   const dutyStatus = todayRecord?.dutyStatus || 'duty_off';
 
   // My Tasks
-  const myTasks = work.filter((w) => w.staffId === myEmployeeId);
+  const myTasks = work.filter((w) => isMyRecord(w.staffId));
   const pendingTasks = myTasks.filter((w) => w.status === 'pending' || w.status === 'in_progress');
   const completedTasks = myTasks.filter((w) => w.status === 'completed');
 
   // My Expenses
-  const myExpenses = expenses.filter((e) => e.staffId === myEmployeeId);
+  const myExpenses = expenses.filter((e) => isMyRecord(e.staffId));
   const pendingExpenses = myExpenses.filter((e) => e.approvalStatus === 'pending');
   const totalPendingExpenseAmount = pendingExpenses.reduce((sum, e) => sum + e.amount, 0);
 
@@ -93,15 +100,14 @@ export const StaffDashboardPage: React.FC = () => {
     (n) =>
       n.status === 'published' &&
       (n.targetAudience === 'all' ||
-        (n.targetAudience === 'specific' && n.targetStaffIds?.includes(myEmployeeId || '')))
+        (n.targetAudience === 'specific' &&
+          (n.targetStaffIds?.includes(myEmployeeId || '') ||
+            (myCanonicalId && n.targetStaffIds?.some((id) => getCanonicalEmployeeId(id) === myCanonicalId)))))
   );
 
   // Month attendance summary
   const currentMonthAttendance = attendance.filter((a) => {
-    return (
-      (a.staffId === currentStaff?.employeeId || a.staffId === currentStaff?.id) &&
-      a.date.startsWith(currentMonthStr)
-    );
+    return isMyRecord(a.staffId) && a.date.startsWith(currentMonthStr);
   });
   const presentDaysCount = currentMonthAttendance.filter(
     (a) => a.status === 'present' || a.status === 'half_day'
@@ -109,7 +115,7 @@ export const StaffDashboardPage: React.FC = () => {
 
   // Monthly salary summary
   const myCurrentSalary = salaries.find(
-    (s) => s.staffId === currentStaff?.id && s.month === currentMonthStr
+    (s) => isMyRecord(s.staffId) && s.month === currentMonthStr
   );
 
   const formattedDate = currentTime.toLocaleDateString('en-IN', {

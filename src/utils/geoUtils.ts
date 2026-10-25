@@ -355,3 +355,5 @@ export async function acquireRobustGPSCoordinates(
   };
 }
 
+export { getCanonicalEmployeeId } from './firestoreUtils';
+

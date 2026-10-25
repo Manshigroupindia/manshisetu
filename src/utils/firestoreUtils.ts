@@ -59,3 +59,16 @@ export function sanitizeFirestorePayload<T>(input: T): T {
 
   return sanitized as T;
 }
+
+/**
+ * Resolves the canonical employee ID (e.g. "MGS-101") from any ID variant.
+ * Strips accidental document prefixes like "staff-", trims whitespace,
+ * and normalizes to uppercase.
+ */
+export function getCanonicalEmployeeId(input?: string | null, fallback?: string | null): string {
+  const candidate = (input && input.trim()) ? input.trim() : (fallback && fallback.trim()) ? fallback.trim() : '';
+  if (!candidate) return '';
+  // Strip leading "staff-" or "staff_" prefix
+  const cleaned = candidate.replace(/^staff[-_]/i, '').trim();
+  return cleaned.toUpperCase();
+}

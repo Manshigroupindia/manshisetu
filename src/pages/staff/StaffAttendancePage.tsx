@@ -22,6 +22,7 @@ import { AttendanceRecord } from '../../types';
 import { getTodayDateString, getCurrentMonthString } from '../../utils/dateUtils';
 import { useAttendanceLocation } from '../../hooks/useAttendanceLocation';
 import { LocationErrorBanner } from '../../components/common/LocationErrorBanner';
+import { getCanonicalEmployeeId } from '../../utils/firestoreUtils';
 
 export const StaffAttendancePage: React.FC = () => {
   const {
@@ -48,14 +49,21 @@ export const StaffAttendancePage: React.FC = () => {
   } = useAttendanceLocation();
 
   const todayStr = getTodayDateString();
+  const myCanonicalId = getCanonicalEmployeeId(currentStaff?.employeeId, currentStaff?.id);
+
+  const isMyAttendance = (a: AttendanceRecord) =>
+    (myCanonicalId && getCanonicalEmployeeId(a.staffId) === myCanonicalId) ||
+    a.staffId === currentStaff?.employeeId ||
+    a.staffId === currentStaff?.id;
+
   const todayRecord = attendance.find(
-    (a) => (a.staffId === currentStaff?.employeeId || a.staffId === currentStaff?.id) && a.date === todayStr
+    (a) => isMyAttendance(a) && a.date === todayStr
   );
   const dutyStatus = todayRecord?.dutyStatus || 'duty_off';
 
   // Attendance for the chosen month (staff only)
   const monthAttendance = attendance.filter(
-    (a) => (a.staffId === currentStaff?.employeeId || a.staffId === currentStaff?.id) && a.date.startsWith(selectedMonth)
+    (a) => isMyAttendance(a) && a.date.startsWith(selectedMonth)
   );
 
   // Month stats calculations

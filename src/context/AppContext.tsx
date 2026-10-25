@@ -32,6 +32,7 @@ import {
   getISTTimestamp,
   computeSessionDuration,
 } from '../utils/geoUtils';
+import { getCanonicalEmployeeId } from '../utils/firestoreUtils';
 
 export interface ToastMessage {
   id: string;
@@ -286,7 +287,13 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     );
 
     // Subscribe to Work Assignments (filtered if staff)
-    const staffFilter = auth.role === 'staff' ? auth.employeeId : undefined;
+    const canonicalEmployeeId = getCanonicalEmployeeId(
+      auth.employeeId,
+      auth.staffId || currentStaffProfile?.employeeId || currentStaffProfile?.id
+    );
+    const staffFilter = auth.role === 'staff'
+      ? (canonicalEmployeeId || auth.employeeId || 'NO_STAFF_ID')
+      : undefined;
     unsubs.push(
       workService.subscribeWork((cloudWork) => {
         if (cloudWork) {
@@ -471,7 +478,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     staffId: string,
     coords: { latitude: number; longitude: number; accuracy: number }
   ): Promise<AttendanceRecord> => {
-    const cleanStaffId = staffId.trim();
+    const cleanStaffId = getCanonicalEmployeeId(
+      staffId,
+      auth.employeeId || currentStaff?.employeeId || currentStaff?.id
+    );
     const office = settings.officeGeofence || {
       latitude: 28.6289,
       longitude: 77.2219,
@@ -516,7 +526,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     coords: { latitude: number; longitude: number; accuracy: number }
   ): Promise<AttendanceRecord> => {
     const todayStr = attendanceService.getTodayDateString();
-    const cleanStaffId = staffId.trim();
+    const cleanStaffId = getCanonicalEmployeeId(
+      staffId,
+      auth.employeeId || currentStaff?.employeeId || currentStaff?.id
+    );
     const office = settings.officeGeofence || {
       latitude: 28.6289,
       longitude: 77.2219,
@@ -535,7 +548,8 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
     const existingIdx = attendance.findIndex(
       (r) =>
-        (r.staffId === cleanStaffId ||
+        (getCanonicalEmployeeId(r.staffId) === cleanStaffId ||
+          r.staffId === cleanStaffId ||
           (currentStaff && (r.staffId === currentStaff.id || r.staffId === currentStaff.employeeId))) &&
         r.date === todayStr
     );
