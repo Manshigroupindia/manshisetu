@@ -15,12 +15,16 @@ import {
   MapPin,
   FileCheck,
   Download,
+  CreditCard,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { Modal } from '../../components/common/Modal';
+import { ManshiIdCard } from '../../components/common/ManshiIdCard';
 
 export const StaffProfilePage: React.FC = () => {
   const { currentStaff, updateStaffPersonalProfile, showToast } = useApp();
 
+  const [isIdCardModalOpen, setIsIdCardModalOpen] = useState(false);
   const [isEditingPersonal, setIsEditingPersonal] = useState(false);
   const [alternateContact, setAlternateContact] = useState(
     currentStaff?.alternateContact || ''
@@ -75,10 +79,20 @@ export const StaffProfilePage: React.FC = () => {
           </p>
         </div>
 
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold self-start sm:self-auto">
-          <ShieldCheck className="w-4 h-4 text-emerald-500" />
-          <span>Active Employee · Verified</span>
-        </span>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={() => setIsIdCardModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-2xl bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 text-white font-extrabold text-xs shadow-md shadow-red-600/20 active:scale-95 transition-all cursor-pointer"
+          >
+            <CreditCard className="w-4 h-4" />
+            <span>Official ID Card</span>
+          </button>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-bold">
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            <span>Active Employee · Verified</span>
+          </span>
+        </div>
       </div>
 
       {/* Main Profile Dossier Card */}
@@ -339,6 +353,21 @@ export const StaffProfilePage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Manshi Group Official ID Card Modal */}
+      {currentStaff && (
+        <Modal
+          isOpen={isIdCardModalOpen}
+          onClose={() => setIsIdCardModalOpen(false)}
+          title="Manshi Group Of Services — Official Identity Card"
+          subtitle={`${currentStaff.fullName} · ${currentStaff.employeeId} · ${currentStaff.designation}`}
+          maxWidth="4xl"
+        >
+          <div className="py-2">
+            <ManshiIdCard staff={currentStaff} />
+          </div>
+        </Modal>
+      )}
     </div>
   );
 };

@@ -3,20 +3,16 @@ import {
   Menu,
   Moon,
   Sun,
-  Bell,
-  CheckCircle2,
-  AlertTriangle,
   User,
   LogOut,
   ChevronDown,
-  ExternalLink,
-  Sparkles,
   MapPin,
   Clock,
   Briefcase,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { DigitalClock } from '../common/DigitalClock';
+import { NotificationDropdown } from '../common/NotificationDropdown';
 import { Link, useNavigate } from 'react-router-dom';
 import { getTodayDateString } from '../../utils/dateUtils';
 import { getCanonicalEmployeeId } from '../../utils/firestoreUtils';
@@ -26,30 +22,9 @@ interface StaffHeaderProps {
 }
 
 export const StaffHeader: React.FC<StaffHeaderProps> = ({ onToggleMobileMenu }) => {
-  const { darkMode, toggleDarkMode, notices, work, expenses, settings, logout, currentStaff, attendance } = useApp();
-  const [showNotifications, setShowNotifications] = useState(false);
+  const { darkMode, toggleDarkMode, settings, logout, currentStaff, attendance } = useApp();
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const navigate = useNavigate();
-
-  const myEmployeeId = currentStaff?.employeeId;
-
-  // Employee-targeted urgent tasks, expense reviews, notices
-  const myUrgentTasks = work.filter(
-    (w) => w.staffId === myEmployeeId && w.priority === 'urgent' && w.status !== 'completed'
-  );
-  const myPendingExpenses = expenses.filter(
-    (e) => e.staffId === myEmployeeId && (e.approvalStatus === 'approved' || e.approvalStatus === 'rejected')
-  );
-  const myRecentNotices = notices
-    .filter(
-      (n) =>
-        n.status === 'published' &&
-        (n.targetAudience === 'all' ||
-          (n.targetAudience === 'specific' && n.targetStaffIds?.includes(myEmployeeId || '')))
-    )
-    .slice(0, 3);
-
-  const totalNotificationCount = myUrgentTasks.length + myPendingExpenses.length + myRecentNotices.length;
 
   // Today's attendance duty status
   const todayStr = getTodayDateString();
@@ -146,106 +121,14 @@ export const StaffHeader: React.FC<StaffHeaderProps> = ({ onToggleMobileMenu }) 
             {darkMode ? <Sun className="w-4.5 h-4.5 text-amber-400" /> : <Moon className="w-4.5 h-4.5" />}
           </button>
 
-          {/* Notifications Dropdown */}
-          <div className="relative">
-            <button
-              onClick={() => {
-                setShowNotifications(!showNotifications);
-                setShowProfileMenu(false);
-              }}
-              title="Notifications"
-              className="relative p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-navy-800 transition-colors border border-slate-200 dark:border-navy-700/80"
-            >
-              <Bell className="w-4.5 h-4.5" />
-              {totalNotificationCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4.5 h-4.5 bg-blue-600 text-white text-[10px] font-bold rounded-full flex items-center justify-center ring-2 ring-white dark:ring-navy-900">
-                  {totalNotificationCount}
-                </span>
-              )}
-            </button>
-
-            {showNotifications && (
-              <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white dark:bg-navy-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-navy-800 py-3 z-50 animate-in fade-in zoom-in-95 duration-150">
-                <div className="flex items-center justify-between px-4 pb-2.5 border-b border-slate-100 dark:border-navy-800">
-                  <div className="font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-blue-600" />
-                    My Activity & Notices
-                  </div>
-                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400">
-                    {totalNotificationCount} Updates
-                  </span>
-                </div>
-
-                <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-navy-800/80">
-                  {myUrgentTasks.map((t) => (
-                    <Link
-                      key={t.id}
-                      to="/staff/work"
-                      onClick={() => setShowNotifications(false)}
-                      className="flex items-start gap-3 p-3 hover:bg-slate-50 dark:hover:bg-navy-800/60 transition-colors text-left"
-                    >
-                      <div className="p-1.5 rounded-lg bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 shrink-0 mt-0.5">
-                        <AlertTriangle className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                          Urgent Task: {t.title}
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                          Due by: {t.deadlineDate}
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-
-                  {myRecentNotices.map((n) => (
-                    <Link
-                      key={n.id}
-                      to="/staff/notices"
-                      onClick={() => setShowNotifications(false)}
-                      className="flex items-start gap-3 p-3 hover:bg-slate-50 dark:hover:bg-navy-800/60 transition-colors text-left"
-                    >
-                      <div className="p-1.5 rounded-lg bg-blue-100 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400 shrink-0 mt-0.5">
-                        <CheckCircle2 className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                          {n.title}
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                          {n.category} · Published {n.publishDate}
-                        </div>
-                      </div>
-                    </Link>
-                  ))}
-
-                  {totalNotificationCount === 0 && (
-                    <div className="py-6 text-center text-xs text-slate-400">
-                      No pending urgent notifications.
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-2 border-t border-slate-100 dark:border-navy-800 text-center">
-                  <Link
-                    to="/staff/notices"
-                    onClick={() => setShowNotifications(false)}
-                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
-                  >
-                    View All Company Notices
-                    <ExternalLink className="w-3 h-3" />
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Real-time Notifications Dropdown */}
+          <NotificationDropdown />
 
           {/* Staff Profile Dropdown */}
           <div className="relative">
             <button
               onClick={() => {
                 setShowProfileMenu(!showProfileMenu);
-                setShowNotifications(false);
               }}
               className="flex items-center gap-2.5 p-1 sm:pl-2.5 sm:pr-2 py-1 rounded-xl hover:bg-slate-100 dark:hover:bg-navy-800 transition-colors border border-slate-200/80 dark:border-navy-700/80"
             >

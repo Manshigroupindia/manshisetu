@@ -15,6 +15,9 @@ import {
   GPSLocation,
   LocationVerificationStatus,
   MigrationStatus,
+  AppNotification,
+  NotificationType,
+  WebSocketConnectionStatus,
 } from '../types';
 import { storageService } from '../services/storageService';
 import { authService, AuthSession } from '../services/authService';
@@ -26,6 +29,8 @@ import { salaryService } from '../services/salaryService';
 import { noticeService } from '../services/noticeService';
 import { companyService } from '../services/companyService';
 import { migrationService } from '../services/migrationService';
+import { notificationService } from '../services/notificationService';
+import { websocketNotificationService } from '../services/websocketNotificationService';
 import {
   calculateHaversineDistanceMeters,
   getGoogleMapsUrl,
@@ -54,6 +59,10 @@ interface AppContextType {
   settings: CompanySettings;
   auth: AuthSession;
   currentStaff: Staff | null;
+  notifications: AppNotification[];
+  unreadNotificationCount: number;
+  notificationWsStatus: WebSocketConnectionStatus;
+  webNotificationPermission: NotificationPermission;
   toasts: ToastMessage[];
   darkMode: boolean;
   migrationStatus: MigrationStatus | null;
@@ -65,6 +74,10 @@ interface AppContextType {
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
   removeToast: (id: string) => void;
   resetAllDemoData: () => void;
+  markNotificationAsRead: (id: string) => Promise<void>;
+  markAllNotificationsAsRead: () => Promise<void>;
+  deleteNotification: (id: string) => Promise<void>;
+  requestWebNotificationPermission: () => Promise<NotificationPermission>;
   
   // Storage actions
   addStaff: (s: Staff, initialPassword?: string) => Promise<void>;
@@ -174,6 +187,61 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   const removeToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // Real-time Notification State
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [notificationWsStatus, setNotificationWsStatus] = useState<WebSocketConnectionStatus>(() =>
+    websocketNotificationService.getStatus()
+  );
+  const [webNotificationPermission, setWebNotificationPermission] = useState<NotificationPermission>(() =>
+    notificationService.getBrowserPermissionStatus()
+  );
+
+  const unreadNotificationCount = React.useMemo(
+    () => notifications.filter((n) => !n.read).length,
+    [notifications]
+  );
+
+  const markNotificationAsRead = useCallback(async (id: string) => {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
+    );
+    try {
+      await notificationService.markAsRead(id);
+    } catch (err) {
+      console.warn('Failed to mark notification as read in Firestore:', err);
+    }
+  }, []);
+
+  const markAllNotificationsAsRead = useCallback(async () => {
+    const unread = notifications.filter((n) => !n.read);
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    try {
+      await notificationService.markAllAsRead(unread);
+    } catch (err) {
+      console.warn('Failed to mark all notifications as read:', err);
+    }
+  }, [notifications]);
+
+  const deleteNotificationHandler = useCallback(async (id: string) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    try {
+      await notificationService.deleteNotification(id);
+    } catch (err) {
+      console.warn('Failed to delete notification:', err);
+    }
+  }, []);
+
+  const requestWebNotificationPermission = useCallback(async () => {
+    const perm = await notificationService.requestBrowserPermission();
+    setWebNotificationPermission(perm);
+    if (perm === 'granted') {
+      showToast('Live desktop & push notifications enabled!', 'success');
+    } else if (perm === 'denied') {
+      showToast('Notification permission blocked in browser settings.', 'error');
+    }
+    return perm;
+  }, [showToast]);
 
   // Sync dark mode class to html element
   useEffect(() => {
@@ -383,10 +451,47 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       })
     );
 
+    // Subscribe to Real-time Notifications (Firestore Real-time Listener)
+    if (auth.isAuthenticated && auth.role) {
+      unsubs.push(
+        notificationService.subscribeNotifications(
+          auth.role as 'admin' | 'staff',
+          auth.role === 'staff' ? (canonicalEmployeeId || auth.employeeId || 'NO_STAFF_ID') : undefined,
+          (cloudNotifs) => {
+            setNotifications(cloudNotifs);
+          }
+        )
+      );
+
+      // Listen to WebSocket connection status
+      const unsubWsStatus = websocketNotificationService.onStatusChange((status) => {
+        setNotificationWsStatus(status);
+      });
+      unsubs.push(unsubWsStatus);
+
+      // Listen to incoming WebSocket live push notifications
+      const unsubWsNotif = websocketNotificationService.onNotification((notif) => {
+        notificationService.showBrowserNotification(notif);
+        setNotifications((prev) => {
+          if (prev.some((n) => n.id === notif.id)) return prev;
+          return [notif, ...prev];
+        });
+      });
+      unsubs.push(unsubWsNotif);
+
+      // Initialize WebSocket connection
+      websocketNotificationService.connect({
+        uid: auth.uid || 'anonymous',
+        role: auth.role,
+        employeeId: canonicalEmployeeId || auth.employeeId,
+      });
+    }
+
     return () => {
       unsubs.forEach((unsub) => unsub());
+      websocketNotificationService.disconnect();
     };
-  }, [auth.isAuthenticated, auth.role, auth.employeeId]);
+  }, [auth.isAuthenticated, auth.role, auth.employeeId, auth.uid, auth.staffId, currentStaffProfile?.employeeId, currentStaffProfile?.id]);
 
   // Login Director via Firebase Auth
   const loginAdmin = async (emailOrUsername: string, password?: string): Promise<boolean> => {
@@ -517,6 +622,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       'success'
     );
 
+    // Notify Director about Staff Duty On
+    const staffObj = staff.find((s) => s.id === cleanStaffId || s.employeeId === cleanStaffId) || currentStaff;
+    const staffName = staffObj?.fullName || cleanStaffId;
+    notificationService.dispatchNotification({
+      recipientId: 'director',
+      recipientRole: 'director',
+      senderId: cleanStaffId,
+      senderName: staffName,
+      title: `Staff Duty ON: ${staffName}`,
+      message: `${staffName} (${cleanStaffId}) clocked ON duty at ${savedRecord.checkIn || displayTime} (${distance}m from office).`,
+      type: 'attendance_duty_on',
+      priority: 'normal',
+      link: '#/attendance',
+      entityId: `${cleanStaffId}_${savedRecord.date}_on`,
+      action: 'duty_on',
+      metadata: {
+        staffId: cleanStaffId,
+        date: savedRecord.date,
+        checkIn: savedRecord.checkIn,
+        distanceMeters: distance,
+        accuracy: coords.accuracy,
+      },
+    }).catch(console.warn);
+
     return savedRecord;
   };
 
@@ -581,6 +710,29 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       'success'
     );
 
+    // Notify Director about Staff Duty Off
+    const staffObj = staff.find((s) => s.id === cleanStaffId || s.employeeId === cleanStaffId) || currentStaff;
+    const staffName = staffObj?.fullName || cleanStaffId;
+    notificationService.dispatchNotification({
+      recipientId: 'director',
+      recipientRole: 'director',
+      senderId: cleanStaffId,
+      senderName: staffName,
+      title: `Staff Duty OFF: ${staffName}`,
+      message: `${staffName} (${cleanStaffId}) clocked OFF duty at ${updatedRecord.checkOut || displayTime}. Total: ${updatedRecord.sessionDurationText || duration.durationText}.`,
+      type: 'attendance_duty_off',
+      priority: 'normal',
+      link: '#/attendance',
+      entityId: `${cleanStaffId}_${updatedRecord.date}_off`,
+      action: 'duty_off',
+      metadata: {
+        staffId: cleanStaffId,
+        date: updatedRecord.date,
+        checkOut: updatedRecord.checkOut,
+        durationText: updatedRecord.sessionDurationText || duration.durationText,
+      },
+    }).catch(console.warn);
+
     return updatedRecord;
   };
 
@@ -605,6 +757,30 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
     setWork((prev) => prev.map((w) => (w.id === workId ? updated : w)));
     await workService.updateStaffNotes(workId, newStatus, progressNotes, completedNotes);
     showToast(`Task "${existing.title}" updated.`, 'success');
+
+    // Dispatch notification to Director
+    const isCompleted = newStatus === 'completed';
+    const notifType: NotificationType = isCompleted ? 'task_completed' : 'task_updated';
+    const cleanStaffId = getCanonicalEmployeeId(existing.staffId) || existing.staffId;
+    notificationService.dispatchNotification({
+      recipientId: 'director',
+      recipientRole: 'director',
+      senderId: cleanStaffId,
+      senderName: existing.staffName || cleanStaffId,
+      title: isCompleted ? `Task Completed: ${existing.title}` : `Task Progress: ${existing.title}`,
+      message: `${existing.staffName || cleanStaffId} updated status to "${newStatus || existing.status}".${progressNotes ? ` Notes: "${progressNotes}"` : ''}`,
+      type: notifType,
+      priority: isCompleted ? 'normal' : 'low',
+      link: '#/tasks',
+      entityId: `${workId}_${newStatus || 'update'}`,
+      action: newStatus || 'update',
+      metadata: {
+        taskId: workId,
+        status: newStatus || existing.status,
+        progressNotes,
+        completedNotes,
+      },
+    }).catch(console.warn);
   };
 
   // Staff personal profile update
@@ -646,6 +822,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         settings,
         auth,
         currentStaff,
+        notifications,
+        unreadNotificationCount,
+        notificationWsStatus,
+        webNotificationPermission,
         toasts,
         darkMode,
         migrationStatus,
@@ -657,6 +837,10 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         showToast,
         removeToast,
         resetAllDemoData,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        deleteNotification: deleteNotificationHandler,
+        requestWebNotificationPermission,
         addStaff: async (s, initialPassword) => {
           try {
             const { staff: created } = await staffService.createStaffMember(s, initialPassword);
@@ -740,11 +924,54 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setWork((prev) => [w, ...prev]);
           await workService.addWorkAssignment(w);
           showToast(`Task assigned to ${w.staffName}.`, 'success');
+
+          // Notify assigned staff
+          const targetStaffId = getCanonicalEmployeeId(w.staffId) || w.staffId;
+          notificationService.dispatchNotification({
+            recipientId: targetStaffId,
+            recipientRole: 'staff',
+            senderId: auth.uid || 'director',
+            senderName: 'Director (Operations)',
+            title: `New Task Assigned: ${w.title}`,
+            message: `You have been assigned "${w.title}" (Priority: ${w.priority}, Due: ${w.deadlineDate}).`,
+            type: 'task_assigned',
+            priority: w.priority === 'urgent' || w.priority === 'high' ? 'high' : 'normal',
+            link: '#/tasks',
+            entityId: w.id,
+            action: 'assign',
+            metadata: {
+              taskId: w.id,
+              title: w.title,
+              priority: w.priority,
+              deadlineDate: w.deadlineDate,
+            },
+          }).catch(console.warn);
         },
         updateWork: async (w) => {
           setWork((prev) => prev.map((item) => (item.id === w.id ? w : item)));
           await workService.updateWorkAssignment(w);
           showToast('Task updated successfully.', 'success');
+
+          // Notify assigned staff about updates
+          const targetStaffId = getCanonicalEmployeeId(w.staffId) || w.staffId;
+          notificationService.dispatchNotification({
+            recipientId: targetStaffId,
+            recipientRole: 'staff',
+            senderId: auth.uid || 'director',
+            senderName: 'Director (Operations)',
+            title: `Task Updated: ${w.title}`,
+            message: `Task details or status have been updated: "${w.title}".`,
+            type: 'task_updated',
+            priority: 'normal',
+            link: '#/tasks',
+            entityId: `${w.id}_update`,
+            action: 'update',
+            metadata: {
+              taskId: w.id,
+              title: w.title,
+              status: w.status,
+            },
+          }).catch(console.warn);
         },
         deleteWork: async (id) => {
           setWork((prev) => prev.filter((item) => item.id !== id));
@@ -771,11 +998,55 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setExpenses((prev) => [e, ...prev]);
           await expenseService.addExpense(e);
           showToast('Expense claim submitted for review.', 'success');
+
+          // Notify Director
+          const staffId = getCanonicalEmployeeId(e.staffId) || e.staffId;
+          notificationService.dispatchNotification({
+            recipientId: 'director',
+            recipientRole: 'director',
+            senderId: staffId,
+            senderName: e.staffName || staffId,
+            title: `Expense Claim Submitted: ₹${e.amount}`,
+            message: `${e.staffName || staffId} submitted an expense claim of ₹${e.amount} for "${e.category}".`,
+            type: 'expense_request',
+            priority: 'normal',
+            link: '#/expenses',
+            entityId: e.id,
+            action: 'submit',
+            metadata: {
+              expenseId: e.id,
+              amount: e.amount,
+              category: e.category,
+            },
+          }).catch(console.warn);
         },
         updateExpense: async (e) => {
           setExpenses((prev) => prev.map((item) => (item.id === e.id ? e : item)));
           await expenseService.updateExpense(e);
           showToast('Expense status updated.', 'success');
+
+          // Notify staff member regarding approval/rejection
+          const staffId = getCanonicalEmployeeId(e.staffId) || e.staffId;
+          const notifType: NotificationType =
+            e.approvalStatus === 'approved' ? 'expense_approved' : e.approvalStatus === 'rejected' ? 'expense_rejected' : 'expense_request';
+          notificationService.dispatchNotification({
+            recipientId: staffId,
+            recipientRole: 'staff',
+            senderId: auth.uid || 'director',
+            senderName: 'Director (Operations)',
+            title: `Expense Claim ${e.approvalStatus === 'approved' ? 'Approved' : e.approvalStatus === 'rejected' ? 'Rejected' : 'Updated'}: ₹${e.amount}`,
+            message: `Your expense claim of ₹${e.amount} for "${e.category}" has been marked as ${e.approvalStatus}.`,
+            type: notifType,
+            priority: 'normal',
+            link: '#/expenses',
+            entityId: `${e.id}_${e.approvalStatus}`,
+            action: e.approvalStatus,
+            metadata: {
+              expenseId: e.id,
+              amount: e.amount,
+              status: e.approvalStatus,
+            },
+          }).catch(console.warn);
         },
         deleteExpense: async (id) => {
           setExpenses((prev) => prev.filter((item) => item.id !== id));
@@ -786,11 +1057,56 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setAdvances((prev) => [a, ...prev]);
           await salaryService.addSalaryAdvance(a);
           showToast(`Advance of ₹${a.amount} issued to ${a.staffName}.`, 'success');
+
+          // Notify relevant recipient
+          const isDirector = auth.role === 'admin';
+          const targetStaffId = getCanonicalEmployeeId(a.staffId) || a.staffId;
+          notificationService.dispatchNotification({
+            recipientId: isDirector ? targetStaffId : 'director',
+            recipientRole: isDirector ? 'staff' : 'director',
+            senderId: isDirector ? (auth.uid || 'director') : targetStaffId,
+            senderName: isDirector ? 'Director (Operations)' : (a.staffName || targetStaffId),
+            title: isDirector ? `Salary Advance Issued: ₹${a.amount}` : `Salary Advance Requested: ₹${a.amount}`,
+            message: isDirector
+              ? `A salary advance of ₹${a.amount} has been approved and issued to you.`
+              : `${a.staffName} requested a salary advance of ₹${a.amount} (${a.reason || 'Personal'}).`,
+            type: isDirector ? 'salary_advance_approved' : 'salary_advance_request',
+            priority: 'normal',
+            link: '#/salary',
+            entityId: a.id,
+            action: isDirector ? 'issued' : 'request',
+            metadata: {
+              advanceId: a.id,
+              amount: a.amount,
+            },
+          }).catch(console.warn);
         },
         updateAdvance: async (a) => {
           setAdvances((prev) => prev.map((item) => (item.id === a.id ? a : item)));
           await salaryService.updateSalaryAdvance(a);
           showToast('Advance record updated.', 'success');
+
+          const targetStaffId = getCanonicalEmployeeId(a.staffId) || a.staffId;
+          const notifType: NotificationType =
+            a.status === 'approved' ? 'salary_advance_approved' : a.status === 'rejected' ? 'salary_advance_rejected' : 'salary_advance_request';
+          notificationService.dispatchNotification({
+            recipientId: targetStaffId,
+            recipientRole: 'staff',
+            senderId: auth.uid || 'director',
+            senderName: 'Director (Operations)',
+            title: `Salary Advance ${a.status === 'approved' ? 'Approved' : a.status === 'rejected' ? 'Rejected' : 'Updated'}: ₹${a.amount}`,
+            message: `Your advance request for ₹${a.amount} was marked as ${a.status}.`,
+            type: notifType,
+            priority: 'normal',
+            link: '#/salary',
+            entityId: `${a.id}_${a.status}`,
+            action: a.status,
+            metadata: {
+              advanceId: a.id,
+              amount: a.amount,
+              status: a.status,
+            },
+          }).catch(console.warn);
         },
         saveSalaryRecord: async (s) => {
           setSalaries((prev) => {
@@ -804,11 +1120,54 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           });
           await salaryService.saveSalaryRecord(s);
           showToast(`Salary for ${s.staffName} (${s.month}) processed as Paid.`, 'success');
+
+          // Notify Staff about Payslip
+          const targetStaffId = getCanonicalEmployeeId(s.staffId) || s.staffId;
+          notificationService.dispatchNotification({
+            recipientId: targetStaffId,
+            recipientRole: 'staff',
+            senderId: auth.uid || 'director',
+            senderName: 'Manshi Group Accounts',
+            title: `Salary Disbursed: ${s.month}`,
+            message: `Your salary for ${s.month} has been disbursed: Net Pay ₹${s.finalPayable.toLocaleString('en-IN')}. Payslip is now available.`,
+            type: 'salary_paid',
+            priority: 'high',
+            link: '#/salary',
+            entityId: `${s.id}_${s.month}`,
+            action: 'disbursed',
+            metadata: {
+              salaryId: s.id,
+              month: s.month,
+              netPay: s.finalPayable,
+            },
+          }).catch(console.warn);
         },
         addNotice: async (n) => {
           setNotices((prev) => [n, ...prev]);
           await noticeService.addNotice(n);
           showToast('Notice published successfully.', 'success');
+
+          // Notify All Staff or Specific Staff
+          const target = n.targetAudience === 'specific' && n.targetStaffIds && n.targetStaffIds.length > 0
+            ? (getCanonicalEmployeeId(n.targetStaffIds[0]) || n.targetStaffIds[0])
+            : 'all';
+          notificationService.dispatchNotification({
+            recipientId: target,
+            recipientRole: target === 'all' ? 'all' : 'staff',
+            senderId: auth.uid || 'director',
+            senderName: 'Director Office',
+            title: `Notice: ${n.title}`,
+            message: n.content.substring(0, 150) + (n.content.length > 150 ? '...' : ''),
+            type: 'notice_published',
+            priority: n.priority === 'urgent' || n.priority === 'high' ? 'high' : 'normal',
+            link: '#/notices',
+            entityId: n.id,
+            action: 'publish',
+            metadata: {
+              noticeId: n.id,
+              title: n.title,
+            },
+          }).catch(console.warn);
         },
         updateNotice: async (n) => {
           setNotices((prev) => prev.map((item) => (item.id === n.id ? n : item)));
@@ -824,6 +1183,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setHolidays((prev) => [h, ...prev]);
           await companyService.addHoliday(h);
           showToast(`Holiday "${h.name}" added to calendar.`, 'success');
+
+          // Notify All
+          notificationService.dispatchNotification({
+            recipientId: 'all',
+            recipientRole: 'all',
+            senderId: auth.uid || 'admin',
+            senderName: 'Manshi Group HR',
+            title: `Holiday Added: ${h.name}`,
+            message: `Office holiday scheduled for ${h.startDate} (${h.description || h.name}).`,
+            type: 'holiday_added',
+            priority: 'low',
+            link: '#/calendar',
+            entityId: h.id,
+            action: 'add',
+            metadata: {
+              holidayId: h.id,
+              date: h.startDate,
+              name: h.name,
+            },
+          }).catch(console.warn);
         },
         updateHoliday: async (h) => {
           setHolidays((prev) => prev.map((item) => (item.id === h.id ? h : item)));
@@ -839,6 +1218,26 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           setEvents((prev) => [e, ...prev]);
           await companyService.addEvent(e);
           showToast(`Office event "${e.title}" scheduled.`, 'success');
+
+          // Notify All
+          notificationService.dispatchNotification({
+            recipientId: 'all',
+            recipientRole: 'all',
+            senderId: auth.uid || 'admin',
+            senderName: 'Manshi Group HR',
+            title: `New Event: ${e.title}`,
+            message: `Event on ${e.date} at ${e.startTime || 'office'}: ${e.description || e.title}`,
+            type: 'event_scheduled',
+            priority: 'normal',
+            link: '#/calendar',
+            entityId: e.id,
+            action: 'add',
+            metadata: {
+              eventId: e.id,
+              date: e.date,
+              title: e.title,
+            },
+          }).catch(console.warn);
         },
         updateEvent: async (e) => {
           setEvents((prev) => prev.map((item) => (item.id === e.id ? e : item)));

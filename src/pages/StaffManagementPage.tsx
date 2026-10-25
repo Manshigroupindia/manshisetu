@@ -31,6 +31,7 @@ import { Staff, EmploymentStatus } from '../types';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { ConfirmModal } from '../components/common/ConfirmModal';
+import { ManshiIdCard } from '../components/common/ManshiIdCard';
 import { formatINR } from '../utils/salaryCalculator';
 import { cloudinaryService } from '../services/cloudinaryService';
 import { getTodayDateString } from '../utils/dateUtils';
@@ -1398,86 +1399,17 @@ export const StaffManagementPage: React.FC = () => {
         </Modal>
       )}
 
-      {/* PRINTABLE EMPLOYEE ID BADGE MODAL */}
+      {/* PRINTABLE EMPLOYEE ID BADGE MODAL (Manshi Group Of Services Exact Recreation) */}
       {selectedStaff && (
         <Modal
           isOpen={isIdCardModalOpen}
           onClose={() => setIsIdCardModalOpen(false)}
-          title="Employee Identity Badge"
-          subtitle={`${selectedStaff.fullName} (${selectedStaff.employeeId})`}
-          maxWidth="md"
+          title="Manshi Group Of Services — Official Identity Card"
+          subtitle={`${selectedStaff.fullName} · ${selectedStaff.employeeId} · ${selectedStaff.designation}`}
+          maxWidth="4xl"
         >
-          <div className="space-y-4 text-xs">
-            <div className="flex justify-end no-print">
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-900 text-white font-bold text-xs"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                Print ID Card
-              </button>
-            </div>
-
-            {/* Corporate ID Badge Container */}
-            <div className="w-72 mx-auto bg-white text-slate-900 rounded-3xl shadow-xl border-2 border-slate-900 overflow-hidden flex flex-col justify-between print-break-inside-avoid">
-              {/* Top Banner */}
-              <div className="bg-slate-900 text-white p-4 text-center">
-                <div className="text-[10px] font-extrabold uppercase tracking-widest text-brand-500">
-                  Manshi Group Setu
-                </div>
-                <div className="font-extrabold text-xs tracking-tight">
-                  {settings.companyName}
-                </div>
-              </div>
-
-              {/* Photo & Identity */}
-              <div className="p-5 text-center flex flex-col items-center">
-                <div className="w-24 h-24 rounded-2xl bg-slate-100 overflow-hidden border-2 border-slate-900 mb-3 shadow-md">
-                  {selectedStaff.avatarUrl ? (
-                    <img
-                      src={selectedStaff.avatarUrl}
-                      alt={selectedStaff.fullName}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center font-black text-3xl">
-                      {selectedStaff.fullName.charAt(0)}
-                    </div>
-                  )}
-                </div>
-
-                <h4 className="font-extrabold text-base text-slate-900 leading-tight">
-                  {selectedStaff.fullName}
-                </h4>
-                <div className="text-xs font-bold text-brand-600 mt-0.5">
-                  {selectedStaff.designation}
-                </div>
-                <div className="text-[11px] text-slate-500 font-semibold">
-                  {selectedStaff.department}
-                </div>
-
-                {/* ID Pill */}
-                <div className="mt-3 px-3 py-1 rounded-full bg-slate-100 font-mono font-bold text-xs border border-slate-300">
-                  ID: {selectedStaff.employeeId}
-                </div>
-
-                <div className="mt-3 text-[10px] text-slate-600 space-y-0.5 text-center">
-                  <div>Emergency: {selectedStaff.emergencyContact.phone}</div>
-                  <div>Issued: {selectedStaff.joiningDate}</div>
-                </div>
-
-                {/* Barcode Placeholder */}
-                <div className="mt-4 pt-3 border-t border-slate-200 w-full flex flex-col items-center">
-                  <div className="h-6 w-40 bg-slate-800 rounded-xs flex items-center justify-center text-[9px] font-mono text-white tracking-widest">
-                    |||| || ||| ||||| ||| ||
-                  </div>
-                  <span className="text-[9px] text-slate-400 mt-1 font-mono">
-                    OFFICIAL AUTHORIZED PASS
-                  </span>
-                </div>
-              </div>
-            </div>
+          <div className="py-2">
+            <ManshiIdCard staff={selectedStaff} />
           </div>
         </Modal>
       )}

@@ -59,6 +59,8 @@ export interface Staff {
   contactNumber: string;
   alternateContact?: string;
   joiningDate: string; // YYYY-MM-DD
+  dob?: string; // DD-MM-YYYY or YYYY-MM-DD
+  expiryDate?: string; // DD-MM-YYYY or YYYY-MM-DD
   status: EmploymentStatus;
   officeLocation: string;
   monthlyFixedSalary: number; // e.g. 24000
@@ -287,4 +289,55 @@ export interface MigrationStatus {
   migratedAt: string;
   migratedBy: string;
   counts: Record<string, number>;
+}
+
+export type NotificationType =
+  | 'duty_on'
+  | 'attendance_duty_on'
+  | 'duty_off'
+  | 'attendance_duty_off'
+  | 'task_assigned'
+  | 'task_updated'
+  | 'task_completed'
+  | 'expense_submitted'
+  | 'expense_request'
+  | 'expense_approved'
+  | 'expense_rejected'
+  | 'salary_processed'
+  | 'salary_paid'
+  | 'salary_advance_requested'
+  | 'salary_advance_request'
+  | 'salary_advance_approved'
+  | 'salary_advance_rejected'
+  | 'notice_published'
+  | 'holiday_added'
+  | 'event_added'
+  | 'event_scheduled'
+  | 'system';
+
+export type NotificationPriority = 'low' | 'normal' | 'high' | 'urgent';
+
+export type WebSocketConnectionStatus =
+  | 'connected'
+  | 'connecting'
+  | 'disconnected'
+  | 'error'
+  | 'fallback_realtime';
+
+export interface AppNotification {
+  id: string;
+  recipientId: string; // canonical employeeId (e.g. MGS-101), 'director', or 'all'
+  recipientRole: 'director' | 'staff' | 'all';
+  senderId: string;
+  senderName: string;
+  title: string;
+  message: string;
+  type: NotificationType;
+  priority: NotificationPriority;
+  link?: string;
+  read: boolean;
+  readAt?: string | null;
+  createdAt: string;
+  dedupKey?: string;
+  metadata?: Record<string, any>;
 }

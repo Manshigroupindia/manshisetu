@@ -184,6 +184,37 @@ service cloud.firestore {
       allow read, write: if isDirector();
     }
 
+    // 14b. Real-time Notifications (notifications/{notifId})
+    match /notifications/{notifId} {
+      allow read: if isAuthenticated() && (
+        isDirector() ||
+        resource == null ||
+        resource.data.recipientRole == 'all' ||
+        resource.data.recipientId == 'all' ||
+        isMatchingCallerStaff(resource.data.recipientId)
+      );
+      allow create: if isAuthenticated() && (
+        isDirector() ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          (
+            request.resource.data.senderId == request.auth.uid ||
+            request.resource.data.senderId == getCallerEmployeeId() ||
+            isMatchingCallerStaff(request.resource.data.senderId)
+          )
+        )
+      );
+      allow update: if isAuthenticated() && (
+        isDirector() ||
+        isMatchingCallerStaff(resource.data.recipientId) ||
+        resource.data.recipientRole == 'all'
+      ) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt', 'updatedAt']);
+      allow delete: if isAuthenticated() && (
+        isDirector() ||
+        isMatchingCallerStaff(resource.data.recipientId)
+      );
+    }
+
     // 15. Default Deny on all unmatched paths
     match /{document=**} {
       allow read, write: if false;

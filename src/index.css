@@ -37,20 +37,57 @@
   background: #94a3b8;
 }
 
+/* ID Card Typography */
+.font-id-slab {
+  font-family: 'Roboto Slab', 'Noto Serif', Rockwell, serif;
+}
+
+.font-id-hindi {
+  font-family: 'Noto Serif Devanagari', 'Martel', serif;
+}
+
 /* Print styles for payslips and ID cards */
 @media print {
+  @page {
+    size: auto;
+    margin: 8mm;
+  }
+
   body {
     background: #ffffff !important;
     color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
+
   .no-print {
     display: none !important;
   }
+
   .print-only {
     display: block !important;
   }
+
   .print-break-inside-avoid {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+
+  .id-card-print-container {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 12mm !important;
+    justify-content: center !important;
+    align-items: flex-start !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .id-card-wrapper {
+    box-shadow: none !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
 }
