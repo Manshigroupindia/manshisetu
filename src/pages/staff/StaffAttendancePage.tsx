@@ -17,7 +17,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { formatDistance, getGoogleMapsUrl } from '../../utils/geoUtils';
+import { formatDistance, getGoogleMapsUrl, getGoogleMapsEmbedUrl } from '../../utils/geoUtils';
 import { AttendanceRecord } from '../../types';
 import { getTodayDateString, getCurrentMonthString } from '../../utils/dateUtils';
 import { useAttendanceLocation } from '../../hooks/useAttendanceLocation';
@@ -49,13 +49,13 @@ export const StaffAttendancePage: React.FC = () => {
 
   const todayStr = getTodayDateString();
   const todayRecord = attendance.find(
-    (a) => a.staffId === currentStaff?.id && a.date === todayStr
+    (a) => (a.staffId === currentStaff?.employeeId || a.staffId === currentStaff?.id) && a.date === todayStr
   );
   const dutyStatus = todayRecord?.dutyStatus || 'duty_off';
 
   // Attendance for the chosen month (staff only)
   const monthAttendance = attendance.filter(
-    (a) => a.staffId === currentStaff?.id && a.date.startsWith(selectedMonth)
+    (a) => (a.staffId === currentStaff?.employeeId || a.staffId === currentStaff?.id) && a.date.startsWith(selectedMonth)
   );
 
   // Month stats calculations
@@ -435,6 +435,16 @@ export const StaffAttendancePage: React.FC = () => {
                       <span>Open Check-in in Google Maps</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
+
+                    {/* Interactive Google Map Preview */}
+                    <div className="pt-2">
+                      <iframe
+                        title="Check-In Map Preview"
+                        src={getGoogleMapsEmbedUrl(selectedRecord.checkInLocation.latitude, selectedRecord.checkInLocation.longitude)}
+                        className="w-full h-32 rounded-xl border border-slate-200 dark:border-navy-700 shadow-xs"
+                        loading="lazy"
+                      />
+                    </div>
                   </div>
                 ) : (
                   <div className="text-xs text-slate-400 italic">Location unavailable</div>
@@ -483,6 +493,16 @@ export const StaffAttendancePage: React.FC = () => {
                       <span>Open Check-out in Google Maps</span>
                       <ExternalLink className="w-3 h-3" />
                     </a>
+
+                    {/* Interactive Google Map Preview */}
+                    <div className="pt-2">
+                      <iframe
+                        title="Check-Out Map Preview"
+                        src={getGoogleMapsEmbedUrl(selectedRecord.checkOutLocation.latitude, selectedRecord.checkOutLocation.longitude)}
+                        className="w-full h-32 rounded-xl border border-slate-200 dark:border-navy-700 shadow-xs"
+                        loading="lazy"
+                      />
+                    </div>
                   </div>
                 ) : (
                   <div className="text-xs text-slate-400 italic">

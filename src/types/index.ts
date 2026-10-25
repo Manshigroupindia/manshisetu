@@ -68,6 +68,7 @@ export interface Staff {
   documents: StaffDocument[];
   notes?: string;
   avatarUrl?: string;
+  uid?: string;
 }
 
 export interface WorkAssignment {

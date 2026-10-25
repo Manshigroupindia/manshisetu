@@ -32,11 +32,6 @@ export const DEMO_STAFF_IDS = [
   'staff-3',
   'staff-4',
   'staff-5',
-  'mgs-101',
-  'mgs-102',
-  'mgs-103',
-  'mgs-104',
-  'mgs-105',
 ];
 
 export const DEMO_EXPENSE_TITLES = [
@@ -117,12 +112,7 @@ export function isDemoSalary(s: Partial<SalaryRecord> | null | undefined): boole
     s.id.toLowerCase().includes('staff-2') ||
     s.id.toLowerCase().includes('staff-3') ||
     s.id.toLowerCase().includes('staff-4') ||
-    s.id.toLowerCase().includes('staff-5') ||
-    s.id.toLowerCase().includes('mgs-101') ||
-    s.id.toLowerCase().includes('mgs-102') ||
-    s.id.toLowerCase().includes('mgs-103') ||
-    s.id.toLowerCase().includes('mgs-104') ||
-    s.id.toLowerCase().includes('mgs-105')
+    s.id.toLowerCase().includes('staff-5')
   )) {
     return true;
   }

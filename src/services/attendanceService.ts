@@ -41,11 +41,15 @@ export class AttendanceService {
   /**
    * Record Duty On (Check-in) with GPS coordinates and Geofence Verification
    */
+  /**
+   * Record Duty On (Check-in) with GPS coordinates and Geofence Verification
+   */
   async recordDutyOn(
     staffId: string,
     coords: { latitude: number; longitude: number; accuracy: number },
     settings: CompanySettings
   ): Promise<AttendanceRecord> {
+    const cleanStaffId = staffId.trim();
     const todayStr = this.getTodayDateString();
     const office = settings.officeGeofence || {
       latitude: 28.6289,
@@ -83,7 +87,7 @@ export class AttendanceService {
     };
 
     // Check if session already exists for today
-    const recordId = `att-${staffId}-${todayStr}`;
+    const recordId = `att-${cleanStaffId}-${todayStr}`;
     const docRef = doc(db, 'attendanceSessions', recordId);
     const existingSnap = await getDoc(docRef);
     const existing = existingSnap.exists() ? (existingSnap.data() as AttendanceRecord) : null;
@@ -94,8 +98,8 @@ export class AttendanceService {
 
     const newRecord: AttendanceRecord = {
       id: recordId,
-      sessionId: existing?.sessionId || `sess-${staffId}-${Date.now()}`,
-      staffId,
+      sessionId: existing?.sessionId || `sess-${cleanStaffId}-${Date.now()}`,
+      staffId: cleanStaffId,
       date: todayStr,
       status: 'present',
       dutyStatus: 'duty_on',
@@ -122,8 +126,10 @@ export class AttendanceService {
   async recordDutyOff(
     staffId: string,
     coords: { latitude: number; longitude: number; accuracy: number },
-    settings: CompanySettings
+    settings: CompanySettings,
+    fallbackExisting?: Partial<AttendanceRecord> | null
   ): Promise<AttendanceRecord> {
+    const cleanStaffId = staffId.trim();
     const todayStr = this.getTodayDateString();
     const office = settings.officeGeofence || {
       latitude: 28.6289,
@@ -160,21 +166,23 @@ export class AttendanceService {
       mapsUrl,
     };
 
-    const recordId = `att-${staffId}-${todayStr}`;
+    const recordId = `att-${cleanStaffId}-${todayStr}`;
     const docRef = doc(db, 'attendanceSessions', recordId);
     const existingSnap = await getDoc(docRef);
-    const existing = existingSnap.exists() ? (existingSnap.data() as AttendanceRecord) : null;
+    const existingFromDb = existingSnap.exists() ? (existingSnap.data() as AttendanceRecord) : null;
+    const existing = existingFromDb || fallbackExisting || null;
 
-    const duration = computeSessionDuration(existing?.checkInTimestamp, isoString);
+    const startTimestamp = existing?.checkInTimestamp || isoString;
+    const duration = computeSessionDuration(startTimestamp, isoString);
 
     const updatedRecord: AttendanceRecord = {
       id: recordId,
-      sessionId: existing?.sessionId || `sess-${staffId}-${Date.now()}`,
-      staffId,
+      sessionId: existing?.sessionId || `sess-${cleanStaffId}-${Date.now()}`,
+      staffId: cleanStaffId,
       date: todayStr,
       status: 'present',
       dutyStatus: 'duty_completed',
-      // PRESERVE check-in details
+      // PRESERVE original check-in details completely
       checkIn: existing?.checkIn || timeOnly,
       checkInTimestamp: existing?.checkInTimestamp || isoString,
       checkInLocation: existing?.checkInLocation,

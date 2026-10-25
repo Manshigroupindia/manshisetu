@@ -1,6 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
+import { getFunctions } from "firebase/functions";
 
 // Exact Firebase project configuration supplied by project owner
 export const firebaseConfig = {
@@ -17,6 +18,7 @@ export const firebaseConfig = {
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const functions = getFunctions(app);
 
 // Authorized Director Email Constant
 export const AUTHORIZED_DIRECTOR_EMAIL = (

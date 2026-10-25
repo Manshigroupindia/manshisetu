@@ -27,7 +27,7 @@ import { AttendanceRecord, Staff, AttendanceStatus } from '../types';
 import { Badge } from '../components/common/Badge';
 import { Modal } from '../components/common/Modal';
 import { getDaysInMonthArray, isSunday } from '../utils/salaryCalculator';
-import { formatDistance, getGoogleMapsUrl } from '../utils/geoUtils';
+import { formatDistance, getGoogleMapsUrl, getGoogleMapsEmbedUrl } from '../utils/geoUtils';
 import { getTodayDateString, getCurrentMonthString } from '../utils/dateUtils';
 import { EmptyState } from '../components/common/EmptyState';
 import {
@@ -748,7 +748,7 @@ export const AttendancePage: React.FC = () => {
                     </tr>
                   ) : (
                     monthRecords.map((rec) => {
-                    const emp = staff.find((s) => s.id === rec.staffId);
+                    const emp = staff.find((s) => s.id === rec.staffId || s.employeeId === rec.staffId);
                     const checkInLoc = rec.checkInLocation;
                     const checkOutLoc = rec.checkOutLocation;
                     const checkInDist = rec.checkInDistanceMeters;
@@ -1318,7 +1318,7 @@ export const AttendancePage: React.FC = () => {
           maxWidth="4xl"
         >
           {(() => {
-            const emp = staff.find((s) => s.id === selectedSessionRecord.staffId);
+            const emp = staff.find((s) => s.id === selectedSessionRecord.staffId || s.employeeId === selectedSessionRecord.staffId);
             const checkIn = selectedSessionRecord.checkInLocation;
             const checkOut = selectedSessionRecord.checkOutLocation;
             const checkInDist = selectedSessionRecord.checkInDistanceMeters;
@@ -1451,6 +1451,16 @@ export const AttendancePage: React.FC = () => {
                             <span>View Check-in Location</span>
                             <ExternalLink className="w-3.5 h-3.5" />
                           </a>
+
+                          {/* Interactive Google Map Preview */}
+                          <div className="pt-2">
+                            <iframe
+                              title="Admin Check-In Map Preview"
+                              src={getGoogleMapsEmbedUrl(checkIn.latitude, checkIn.longitude)}
+                              className="w-full h-36 rounded-xl border border-slate-200 dark:border-navy-700 shadow-xs"
+                              loading="lazy"
+                            />
+                          </div>
                         </div>
                       </div>
                     ) : (
@@ -1545,6 +1555,16 @@ export const AttendancePage: React.FC = () => {
                             <span>View Check-out Location</span>
                             <ExternalLink className="w-3.5 h-3.5" />
                           </a>
+
+                          {/* Interactive Google Map Preview */}
+                          <div className="pt-2">
+                            <iframe
+                              title="Admin Check-Out Map Preview"
+                              src={getGoogleMapsEmbedUrl(checkOut.latitude, checkOut.longitude)}
+                              className="w-full h-36 rounded-xl border border-slate-200 dark:border-navy-700 shadow-xs"
+                              loading="lazy"
+                            />
+                          </div>
                         </div>
                       </div>
                     ) : (

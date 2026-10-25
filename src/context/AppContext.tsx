@@ -87,11 +87,11 @@ interface AppContextType {
   recordDutyOn: (
     staffId: string,
     coords: { latitude: number; longitude: number; accuracy: number }
-  ) => AttendanceRecord;
+  ) => Promise<AttendanceRecord>;
   recordDutyOff: (
     staffId: string,
     coords: { latitude: number; longitude: number; accuracy: number }
-  ) => AttendanceRecord;
+  ) => Promise<AttendanceRecord>;
   
   addExpense: (e: Expense) => Promise<void>;
   updateExpense: (e: Expense) => Promise<void>;
@@ -467,11 +467,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
   };
 
   // GPS Attendance: Record Duty On
-  const recordDutyOn = (
+  const recordDutyOn = async (
     staffId: string,
     coords: { latitude: number; longitude: number; accuracy: number }
-  ): AttendanceRecord => {
-    const todayStr = attendanceService.getTodayDateString();
+  ): Promise<AttendanceRecord> => {
+    const cleanStaffId = staffId.trim();
     const office = settings.officeGeofence || {
       latitude: 28.6289,
       longitude: 77.2219,
@@ -486,76 +486,37 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       office.longitude
     );
 
-    let verification: LocationVerificationStatus = 'within_geofence';
-    if (coords.accuracy > 500) {
-      verification = 'needs_review';
-    } else if (office.enabled && distance > office.radiusMeters) {
-      verification = 'outside_geofence';
-    } else {
-      verification = 'within_geofence';
-    }
+    const { displayTime } = getISTTimestamp(new Date());
 
-    const { displayTime, timeOnly, isoString } = getISTTimestamp(new Date());
-    const mapsUrl = getGoogleMapsUrl(coords.latitude, coords.longitude);
+    // 1. Write to Firestore first and await confirmation
+    const savedRecord = await attendanceService.recordDutyOn(cleanStaffId, coords, settings);
 
-    const locationObj: GPSLocation = {
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-      accuracy: coords.accuracy,
-      timestamp: isoString,
-      displayTime,
-      mapsUrl,
-    };
-
-    const existingIdx = attendance.findIndex(
-      (r) => r.staffId === staffId && r.date === todayStr
-    );
-    const existing = existingIdx >= 0 ? attendance[existingIdx] : null;
-
-    const newRecord: AttendanceRecord = {
-      id: existing ? existing.id : `att-${staffId}-${todayStr}`,
-      sessionId: existing?.sessionId || `sess-${staffId}-${Date.now()}`,
-      staffId,
-      date: todayStr,
-      status: 'present',
-      dutyStatus: 'duty_on',
-      checkIn: timeOnly,
-      checkInTimestamp: isoString,
-      checkInLocation: locationObj,
-      checkInDistanceMeters: distance,
-      checkInVerification: verification,
-      notes: 'Duty On recorded via GPS Geolocation',
-    };
-
-    // Optimistically update local state & sync to Firestore
+    // 2. Update local state now that Firestore write has succeeded
     setAttendance((prev) => {
-      const idx = prev.findIndex((r) => r.id === newRecord.id);
+      const idx = prev.findIndex((r) => r.id === savedRecord.id);
       if (idx >= 0) {
         const copy = [...prev];
-        copy[idx] = newRecord;
+        copy[idx] = savedRecord;
         return copy;
       }
-      return [newRecord, ...prev];
-    });
-
-    attendanceService.recordDutyOn(staffId, coords, settings).catch((err) => {
-      console.error('Duty on sync error:', err);
-      showToast(`Cloud sync warning: ${err.message}`, 'info');
+      return [savedRecord, ...prev];
     });
 
     showToast(
-      `Duty On recorded successfully at ${displayTime}! (${distance}m from office)`,
+      `Duty On recorded successfully at ${savedRecord.checkIn || displayTime}! (${distance}m from office, accuracy ±${Math.round(coords.accuracy)}m)`,
       'success'
     );
-    return newRecord;
+
+    return savedRecord;
   };
 
   // GPS Attendance: Record Duty Off
-  const recordDutyOff = (
+  const recordDutyOff = async (
     staffId: string,
     coords: { latitude: number; longitude: number; accuracy: number }
-  ): AttendanceRecord => {
+  ): Promise<AttendanceRecord> => {
     const todayStr = attendanceService.getTodayDateString();
+    const cleanStaffId = staffId.trim();
     const office = settings.officeGeofence || {
       latitude: 28.6289,
       longitude: 77.2219,
@@ -570,59 +531,27 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       office.longitude
     );
 
-    let verification: LocationVerificationStatus = 'within_geofence';
-    if (coords.accuracy > 500) {
-      verification = 'needs_review';
-    } else if (office.enabled && distance > office.radiusMeters) {
-      verification = 'outside_geofence';
-    } else {
-      verification = 'within_geofence';
-    }
-
-    const { displayTime, timeOnly, isoString } = getISTTimestamp(new Date());
-    const mapsUrl = getGoogleMapsUrl(coords.latitude, coords.longitude);
-
-    const locationObj: GPSLocation = {
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-      accuracy: coords.accuracy,
-      timestamp: isoString,
-      displayTime,
-      mapsUrl,
-    };
+    const { displayTime, isoString } = getISTTimestamp(new Date());
 
     const existingIdx = attendance.findIndex(
-      (r) => r.staffId === staffId && r.date === todayStr
+      (r) =>
+        (r.staffId === cleanStaffId ||
+          (currentStaff && (r.staffId === currentStaff.id || r.staffId === currentStaff.employeeId))) &&
+        r.date === todayStr
     );
     const existing = existingIdx >= 0 ? attendance[existingIdx] : null;
 
     const duration = computeSessionDuration(existing?.checkInTimestamp, isoString);
 
-    const updatedRecord: AttendanceRecord = {
-      id: existing ? existing.id : `att-${staffId}-${todayStr}`,
-      sessionId: existing?.sessionId || `sess-${staffId}-${Date.now()}`,
-      staffId,
-      date: todayStr,
-      status: 'present',
-      dutyStatus: 'duty_completed',
-      checkIn: existing?.checkIn || timeOnly,
-      checkInTimestamp: existing?.checkInTimestamp,
-      checkInLocation: existing?.checkInLocation,
-      checkInDistanceMeters: existing?.checkInDistanceMeters,
-      checkInVerification: existing?.checkInVerification,
-      checkOut: timeOnly,
-      checkOutTimestamp: isoString,
-      checkOutLocation: locationObj,
-      checkOutDistanceMeters: distance,
-      checkOutVerification: verification,
-      workingHours: duration.hours > 0 ? duration.hours : (existing?.workingHours || 0),
-      sessionDurationText: duration.durationText,
-      notes: existing?.notes
-        ? `${existing.notes} | Duty Off recorded via GPS Geolocation`
-        : 'Duty Off recorded via GPS Geolocation',
-    };
+    // 1. Write to Firestore first and await confirmation
+    const updatedRecord = await attendanceService.recordDutyOff(
+      cleanStaffId,
+      coords,
+      settings,
+      existing
+    );
 
-    // Optimistically update
+    // 2. Update local state now that Firestore write has succeeded
     setAttendance((prev) => {
       const idx = prev.findIndex((r) => r.id === updatedRecord.id);
       if (idx >= 0) {
@@ -633,15 +562,11 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
       return [updatedRecord, ...prev];
     });
 
-    attendanceService.recordDutyOff(staffId, coords, settings).catch((err) => {
-      console.error('Duty off sync error:', err);
-      showToast(`Cloud sync warning: ${err.message}`, 'info');
-    });
-
     showToast(
-      `Duty Off recorded successfully at ${displayTime}! Total duty: ${duration.durationText}`,
+      `Duty Off recorded successfully at ${updatedRecord.checkOut || displayTime}! Total duty: ${updatedRecord.sessionDurationText || duration.durationText} (accuracy ±${Math.round(coords.accuracy)}m)`,
       'success'
     );
+
     return updatedRecord;
   };
 
@@ -721,7 +646,16 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
         addStaff: async (s, initialPassword) => {
           try {
             const { staff: created } = await staffService.createStaffMember(s, initialPassword);
-            setStaff((prev) => [created, ...prev]);
+            // Avoid duplicate cards: check if real-time Firestore listener already added this employee
+            setStaff((prev) => {
+              const alreadyExists = prev.some(
+                (item) =>
+                  (item.employeeId && item.employeeId.toUpperCase() === created.employeeId.toUpperCase()) ||
+                  (item.id && created.id && item.id === created.id)
+              );
+              if (alreadyExists) return prev;
+              return [created, ...prev];
+            });
             showToast(`Staff member ${s.fullName} (${s.employeeId}) provisioned with Firebase login.`, 'success');
           } catch (err: any) {
             showToast(err.message || 'Failed to create staff account.', 'error');
@@ -758,12 +692,32 @@ export const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
           }
         },
         deleteStaff: async (id) => {
-          setStaff((prev) => prev.filter((item) => item.id !== id && item.employeeId !== id));
           try {
-            await staffService.deleteStaff(id);
-            showToast('Staff account deleted. Historical attendance & payroll records remain preserved.', 'info');
+            const result = await staffService.deleteStaff(id);
+            setStaff((prev) =>
+              prev.filter(
+                (item) =>
+                  item.id !== id &&
+                  item.employeeId !== id &&
+                  item.employeeId !== result.employeeId
+              )
+            );
+            // Also remove active uncompleted tasks for this staff member from local state
+            setWork((prev) =>
+              prev.filter(
+                (w) =>
+                  !(
+                    (w.staffId === id || w.staffId === result.employeeId) &&
+                    (w.status === 'pending' || w.status === 'in_progress')
+                  )
+              )
+            );
+            showToast(
+              `Staff member (${result.employeeId}) permanently deleted. Authentication account and portal access removed.`,
+              'success'
+            );
           } catch (err: any) {
-            showToast(err.message || 'Failed to delete staff account.', 'error');
+            showToast(err.message || 'Failed to delete staff member.', 'error');
             throw err;
           }
         },

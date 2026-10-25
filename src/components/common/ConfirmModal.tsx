@@ -1,6 +1,6 @@
 import React from 'react';
 import { Modal } from './Modal';
-import { AlertTriangle, CheckCircle2, AlertOctagon } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, AlertOctagon, Loader2 } from 'lucide-react';
 
 interface ConfirmModalProps {
   isOpen: boolean;
@@ -12,6 +12,7 @@ interface ConfirmModalProps {
   cancelText?: string;
   isDestructive?: boolean;
   variant?: 'danger' | 'warning' | 'success';
+  isLoading?: boolean;
 }
 
 export const ConfirmModal: React.FC<ConfirmModalProps> = ({
@@ -24,6 +25,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   cancelText = 'Cancel',
   isDestructive = true,
   variant,
+  isLoading = false,
 }) => {
   const resolvedVariant = variant || (isDestructive ? 'danger' : 'warning');
 
@@ -58,20 +60,20 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
       <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-100 dark:border-navy-800">
         <button
           type="button"
+          disabled={isLoading}
           onClick={onClose}
-          className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-navy-800 rounded-lg transition-colors"
+          className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-navy-800 rounded-lg transition-colors disabled:opacity-50"
         >
           {cancelText}
         </button>
         <button
           type="button"
-          onClick={() => {
-            onConfirm();
-            onClose();
-          }}
-          className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors shadow-sm ${buttonClasses}`}
+          disabled={isLoading}
+          onClick={onConfirm}
+          className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50 ${buttonClasses}`}
         >
-          {confirmText}
+          {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+          <span>{confirmText}</span>
         </button>
       </div>
     </Modal>

@@ -67,7 +67,7 @@ export function useAttendanceLocation(): UseAttendanceLocationReturn {
       isExecutingRef.current = true;
 
       setIsLocating(true);
-      setLocatingMessage('Acquiring high-accuracy GPS fix...');
+      setLocatingMessage('Getting your location (High Accuracy GPS)...');
       setGeoError(null);
       setLastAction(actionType);
 
@@ -86,15 +86,17 @@ export function useAttendanceLocation(): UseAttendanceLocationReturn {
           return false;
         }
 
-        // Apply existing location validation and record duty
+        const effectiveStaffId = currentStaff.employeeId || currentStaff.id;
+
+        // Apply location validation and record duty
         if (actionType === 'duty_on') {
-          recordDutyOn(currentStaff.id, {
+          await recordDutyOn(effectiveStaffId, {
             latitude: coords.latitude,
             longitude: coords.longitude,
             accuracy: coords.accuracy,
           });
         } else {
-          recordDutyOff(currentStaff.id, {
+          await recordDutyOff(effectiveStaffId, {
             latitude: coords.latitude,
             longitude: coords.longitude,
             accuracy: coords.accuracy,
@@ -108,14 +110,17 @@ export function useAttendanceLocation(): UseAttendanceLocationReturn {
           return false;
         }
 
+        const isDatabaseError = !err?.kind && Boolean(err?.code || err?.message);
         const details: GeoErrorDetails = err?.kind
           ? (err as GeoErrorDetails)
           : {
               kind: 'UNKNOWN',
-              title: 'Location Acquisition Failed',
-              message: err?.message || 'Failed to capture GPS location.',
-              guidance: 'Please click "Retry Location" to capture coordinates again.',
+              title: isDatabaseError ? 'Attendance Record Failed' : 'Location Acquisition Failed',
+              message: err?.message || 'Failed to record attendance session.',
+              guidance:
+                'Please verify your internet connection, ensure location access is enabled, and click "Retry Location".',
               canRetry: true,
+              technicalMessage: err?.message,
             };
 
         setGeoError(details);

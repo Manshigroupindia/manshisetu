@@ -35,6 +35,7 @@ import { formatINR } from '../utils/salaryCalculator';
 import { cloudinaryService } from '../services/cloudinaryService';
 import { getTodayDateString } from '../utils/dateUtils';
 import { EmptyState } from '../components/common/EmptyState';
+import { counterService } from '../services/counterService';
 
 export const StaffManagementPage: React.FC = () => {
   const {
@@ -132,18 +133,22 @@ export const StaffManagementPage: React.FC = () => {
     });
   }, [staff, searchTerm, departmentFilter, statusFilter]);
 
-  // Open Add Staff Form with auto-generated ID
-  const handleOpenAdd = () => {
+  // Open Add Staff Form with auto-generated ID from persistent sequential counter
+  const handleOpenAdd = async () => {
     setIsEditing(false);
     setSelectedStaff(null);
     setFormError('');
 
-    // Auto-generate unique ID e.g. MGS-109
-    const nextIdNumber = 100 + staff.length + 1;
-    const generatedId = `MGS-${nextIdNumber}`;
+    // Fetch next sequential ID preview from persistent counter
+    let previewId = 'MGS-...';
+    try {
+      previewId = await counterService.peekNextStaffId();
+    } catch {
+      previewId = 'MGS-101';
+    }
 
     setFormFullName('');
-    setFormEmployeeId(generatedId);
+    setFormEmployeeId(previewId);
     setFormDesignation('');
     setFormDepartment('Operations');
     setFormEmail('');
@@ -155,7 +160,7 @@ export const StaffManagementPage: React.FC = () => {
     setFormMonthlySalary('');
     setFormAddress('');
     setFormAvatarUrl('');
-    setFormInitialPassword(`Manshi@${generatedId.replace(/[^a-zA-Z0-9]/g, '')}2026`);
+    setFormInitialPassword(`Manshi@${previewId.replace(/[^a-zA-Z0-9]/g, '')}2026`);
 
     setFormEmName('');
     setFormEmRelation('');
@@ -225,6 +230,7 @@ export const StaffManagementPage: React.FC = () => {
   // Submit Add / Edit
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isFormSubmitting) return;
     if (!formFullName.trim() || !formEmail.trim() || !formMonthlySalary) return;
 
     setFormError('');
@@ -241,13 +247,13 @@ export const StaffManagementPage: React.FC = () => {
           department: formDepartment.trim(),
           officialEmail: formEmail.trim(),
           contactNumber: formPhone.trim(),
-          alternateContact: formAltPhone.trim() || undefined,
+          alternateContact: formAltPhone.trim() ? formAltPhone.trim() : undefined,
           joiningDate: formJoiningDate,
           status: formStatus,
           officeLocation: formOfficeLocation.trim(),
           monthlyFixedSalary: salaryNumber,
           address: formAddress.trim(),
-          avatarUrl: formAvatarUrl.trim() || selectedStaff.avatarUrl,
+          avatarUrl: formAvatarUrl.trim() ? formAvatarUrl.trim() : (selectedStaff.avatarUrl || undefined),
           emergencyContact: {
             name: formEmName.trim(),
             relation: formEmRelation.trim(),
@@ -258,27 +264,31 @@ export const StaffManagementPage: React.FC = () => {
             accountNumber: formAccountNumber.trim(),
             ifscCode: formIfscCode.trim(),
             accountHolder: formAccountHolder.trim() || formFullName.trim(),
-            upiId: formUpiId.trim() || undefined,
+            upiId: formUpiId.trim() ? formUpiId.trim() : undefined,
           },
-          notes: formNotes.trim() || undefined,
+          notes: formNotes.trim() ? formNotes.trim() : undefined,
         };
         await updateStaff(updated);
       } else {
+        // Concurrency-safe atomic allocation of persistent sequential employee ID
+        const allocatedId = await counterService.allocateNextStaffId();
+        setFormEmployeeId(allocatedId);
+
         const newStaffItem: Staff = {
-          id: `staff-${Date.now()}`,
-          employeeId: formEmployeeId.trim(),
+          id: `staff-${allocatedId.toLowerCase()}`,
+          employeeId: allocatedId,
           fullName: formFullName.trim(),
           designation: formDesignation.trim(),
           department: formDepartment.trim(),
           officialEmail: formEmail.trim(),
           contactNumber: formPhone.trim(),
-          alternateContact: formAltPhone.trim() || undefined,
+          alternateContact: formAltPhone.trim() ? formAltPhone.trim() : undefined,
           joiningDate: formJoiningDate,
           status: formStatus,
           officeLocation: formOfficeLocation.trim(),
           monthlyFixedSalary: salaryNumber,
           address: formAddress.trim(),
-          avatarUrl: formAvatarUrl.trim() || undefined,
+          avatarUrl: formAvatarUrl.trim() ? formAvatarUrl.trim() : undefined,
           emergencyContact: {
             name: formEmName.trim(),
             relation: formEmRelation.trim(),
@@ -289,12 +299,17 @@ export const StaffManagementPage: React.FC = () => {
             accountNumber: formAccountNumber.trim(),
             ifscCode: formIfscCode.trim(),
             accountHolder: formAccountHolder.trim() || formFullName.trim(),
-            upiId: formUpiId.trim() || undefined,
+            upiId: formUpiId.trim() ? formUpiId.trim() : undefined,
           },
           documents: [],
-          notes: formNotes.trim() || undefined,
+          notes: formNotes.trim() ? formNotes.trim() : undefined,
         };
-        await addStaff(newStaffItem, formInitialPassword);
+
+        const initialPasswordToUse = formInitialPassword.trim()
+          ? formInitialPassword.trim()
+          : `Manshi@${allocatedId.replace(/[^a-zA-Z0-9]/g, '')}2026`;
+
+        await addStaff(newStaffItem, initialPasswordToUse);
       }
 
       setIsFormModalOpen(false);
@@ -509,7 +524,7 @@ export const StaffManagementPage: React.FC = () => {
 
             return (
               <div
-                key={emp.id}
+                key={emp.employeeId || emp.id}
                 className={`bg-white dark:bg-navy-900 rounded-3xl p-6 border shadow-xs transition-all relative flex flex-col justify-between ${
                   isInactive
                     ? 'opacity-65 border-slate-200 dark:border-navy-800 bg-slate-50/50 dark:bg-navy-950/40'
@@ -693,7 +708,7 @@ export const StaffManagementPage: React.FC = () => {
 
                   return (
                     <tr
-                      key={emp.id}
+                      key={emp.employeeId || emp.id}
                       className="hover:bg-slate-50/80 dark:hover:bg-navy-800/50 transition-colors"
                     >
                       <td className="px-5 py-3.5 whitespace-nowrap">
@@ -858,16 +873,25 @@ export const StaffManagementPage: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">
-                  Employee ID (Auto-Generated) *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[11px] font-bold text-slate-500">
+                    Employee ID *
+                  </label>
+                  <span className="text-[10px] font-mono font-bold text-brand-600 bg-brand-50 dark:bg-brand-950/80 px-2 py-0.5 rounded-full border border-brand-200 dark:border-brand-900">
+                    {isEditing ? 'Immutable' : 'Sequential Counter'}
+                  </span>
+                </div>
                 <input
                   type="text"
-                  required
+                  readOnly
                   value={formEmployeeId}
-                  onChange={(e) => setFormEmployeeId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-navy-700 bg-slate-50 dark:bg-navy-950 text-xs font-mono font-bold text-brand-600"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-navy-700 bg-slate-100 dark:bg-navy-950 text-xs font-mono font-bold text-brand-600 cursor-not-allowed"
                 />
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  {isEditing
+                    ? 'Employee ID is permanent and cannot be altered.'
+                    : 'Sequentially generated & non-reusable. Will never be duplicated or re-issued.'}
+                </p>
               </div>
 
               <div>
@@ -1467,6 +1491,7 @@ export const StaffManagementPage: React.FC = () => {
         message={`Are you sure you want to deactivate ${selectedStaff?.fullName} (${selectedStaff?.employeeId})? This will immediately disable their login access to the Staff Portal. Historical attendance records, past salary calculations, and expense filings will remain safely preserved.`}
         confirmText="Deactivate Account"
         variant="warning"
+        isLoading={isProcessingAction}
       />
 
       {/* REACTIVATE CONFIRM MODAL */}
@@ -1478,6 +1503,7 @@ export const StaffManagementPage: React.FC = () => {
         message={`Are you sure you want to reactivate ${selectedStaff?.fullName} (${selectedStaff?.employeeId})? This will restore their active status and re-enable their login access to the Staff Portal.`}
         confirmText="Reactivate Account"
         variant="success"
+        isLoading={isProcessingAction}
       />
 
       {/* DELETE CONFIRM MODAL */}
@@ -1489,6 +1515,7 @@ export const StaffManagementPage: React.FC = () => {
         message={`Are you sure you want to permanently delete the staff account for ${selectedStaff?.fullName} (${selectedStaff?.employeeId})? Their staff directory profile and Firebase login credentials will be removed. All historical attendance logs, payroll calculations, expense claims, and task history will be preserved.`}
         confirmText="Delete Account Permanently"
         variant="danger"
+        isLoading={isProcessingAction}
       />
     </div>
   );

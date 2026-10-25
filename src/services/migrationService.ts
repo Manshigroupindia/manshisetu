@@ -216,7 +216,7 @@ export class MigrationService {
         const data = d.data();
         if (
           isDemoStaff(data as any) ||
-          ['staff-1', 'staff-2', 'staff-3', 'staff-4', 'staff-5', 'mgs-101', 'mgs-102', 'mgs-103', 'mgs-104', 'mgs-105'].includes(d.id.toLowerCase())
+          ['staff-1', 'staff-2', 'staff-3', 'staff-4', 'staff-5'].includes(d.id.toLowerCase())
         ) {
           await stageDelete(d.ref);
         }

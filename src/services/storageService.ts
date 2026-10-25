@@ -323,13 +323,32 @@ export const storageService = {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.STAFF);
       const list: Staff[] = data ? JSON.parse(data) : [];
-      return Array.isArray(list) ? list.filter((s) => !isDemoStaff(s)) : [];
+      if (!Array.isArray(list)) return [];
+      const seen = new Set<string>();
+      const cleanList: Staff[] = [];
+      for (const s of list) {
+        const key = (s.employeeId || s.id || '').trim().toUpperCase();
+        if (key && !seen.has(key) && !isDemoStaff(s)) {
+          seen.add(key);
+          cleanList.push(s);
+        }
+      }
+      return cleanList;
     } catch {
       return [];
     }
   },
   saveStaff(list: Staff[]) {
-    localStorage.setItem(STORAGE_KEYS.STAFF, JSON.stringify(list));
+    const seen = new Set<string>();
+    const deduplicated: Staff[] = [];
+    for (const item of list) {
+      const key = (item.employeeId || item.id || '').trim().toUpperCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        deduplicated.push(item);
+      }
+    }
+    localStorage.setItem(STORAGE_KEYS.STAFF, JSON.stringify(deduplicated));
     notifyListeners();
   },
   addStaff(staffMember: Staff) {

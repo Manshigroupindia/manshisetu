@@ -33,6 +33,8 @@ export const LocationErrorBanner: React.FC<LocationErrorBannerProps> = ({
         return <Lock className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />;
       case 'INSECURE_CONTEXT':
         return <ShieldAlert className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />;
+      case 'POOR_ACCURACY':
+        return <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />;
       case 'TIMEOUT':
         return <WifiOff className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />;
       case 'POSITION_UNAVAILABLE':
@@ -42,7 +44,10 @@ export const LocationErrorBanner: React.FC<LocationErrorBannerProps> = ({
     }
   };
 
-  const isWarningOnly = error.kind === 'PERMISSION_DENIED' || error.kind === 'INSECURE_CONTEXT';
+  const isWarningOnly =
+    error.kind === 'PERMISSION_DENIED' ||
+    error.kind === 'INSECURE_CONTEXT' ||
+    error.kind === 'POOR_ACCURACY';
 
   return (
     <div

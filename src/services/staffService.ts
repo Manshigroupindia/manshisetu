@@ -12,22 +12,24 @@ import {
   getDocs,
   onSnapshot,
   query,
-  orderBy,
   serverTimestamp,
   where,
   addDoc,
+  writeBatch,
 } from 'firebase/firestore';
-import { auth, db, firebaseConfig, AUTHORIZED_DIRECTOR_EMAIL } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, db, firebaseConfig, functions, AUTHORIZED_DIRECTOR_EMAIL } from '../lib/firebase';
 import { Staff, UserProfile } from '../types';
 import { storageService } from './storageService';
 import { isDemoStaff } from '../utils/demoDataFilter';
+import { sanitizeFirestorePayload } from '../utils/firestoreUtils';
 
 export class StaffService {
   /**
    * Provision a new staff member:
    * 1. Creates Firebase Auth user using isolated secondary instance (preserving director's session)
-   * 2. Writes users/{uid} authorization document
-   * 3. Writes staff/{employeeId} employee record
+   * 2. Writes users/{uid} authorization document (sanitized)
+   * 3. Writes staff/{employeeId} employee record (sanitized)
    * 4. Logs audit entry
    */
   async createStaffMember(
@@ -85,7 +87,7 @@ export class StaffService {
       }
     }
 
-    // 2. Create users/{uid} authorization document
+    // 2. Create users/{uid} authorization document (Sanitized)
     const userDocRef = doc(db, 'users', createdUid);
     const userProfile: UserProfile = {
       uid: createdUid,
@@ -97,13 +99,15 @@ export class StaffService {
       updatedAt: new Date().toISOString(),
     };
 
-    await setDoc(userDocRef, {
+    const sanitizedUserPayload = sanitizeFirestorePayload({
       ...userProfile,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
 
-    // 3. Create staff/{employeeId} employee record
+    await setDoc(userDocRef, sanitizedUserPayload);
+
+    // 3. Create staff/{employeeId} employee record (Sanitized: undefined values omitted)
     const staffRecord: Staff = {
       ...staffData,
       id: staffData.id || `staff-${employeeId}`,
@@ -111,12 +115,14 @@ export class StaffService {
       officialEmail: email,
     };
 
-    await setDoc(staffDocRef, {
+    const sanitizedStaffPayload = sanitizeFirestorePayload({
       ...staffRecord,
       uid: createdUid,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
+
+    await setDoc(staffDocRef, sanitizedStaffPayload);
 
     // 4. Record audit log
     try {
@@ -135,20 +141,18 @@ export class StaffService {
   }
 
   /**
-   * Update existing staff profile
+   * Update existing staff profile with sanitized Firestore payload
    */
   async updateStaff(staffData: Staff): Promise<void> {
     const employeeId = staffData.employeeId.trim();
     const staffDocRef = doc(db, 'staff', employeeId);
 
-    await setDoc(
-      staffDocRef,
-      {
-        ...staffData,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    const sanitizedUpdate = sanitizeFirestorePayload({
+      ...staffData,
+      updatedAt: serverTimestamp(),
+    });
+
+    await setDoc(staffDocRef, sanitizedUpdate, { merge: true });
 
     // If status changed to inactive, update users/{uid}
     try {
@@ -310,67 +314,94 @@ export class StaffService {
   }
 
   /**
-   * Delete staff account safely:
-   * 1. Removes the staff directory document
-   * 2. Cleans up linked users/{uid} authorization document so they cannot log in
-   * 3. CRUCIAL: Historical attendance records, salary slips, expense filings, and assigned task histories are SAFELY PRESERVED for audit and reporting compliance.
+   * Permanently delete staff account:
+   * 1. Invokes trusted backend Cloud Function (deleteStaffAccount) to permanently delete or disable
+   *    the Firebase Authentication user account via Admin SDK.
+   * 2. Atomically removes staff/{employeeId} profile document and linked users/{uid} authorization document.
+   * 3. Cleans up active uncompleted assignments specifically assigned to this employee.
+   * 4. CRUCIAL SAFETY: Historical attendance records, salary slips, advances, expenses, and audit logs
+   *    are SAFELY AND PERMANENTLY PRESERVED for regulatory and financial audit compliance.
    */
-  async deleteStaff(idOrEmployeeId: string): Promise<void> {
+  async deleteStaff(idOrEmployeeId: string): Promise<{ success: boolean; employeeId: string; authDeleted: boolean }> {
     const currentUser = auth.currentUser;
     const currentEmail = (currentUser?.email || '').trim().toLowerCase();
-    if (!currentUser || currentEmail !== AUTHORIZED_DIRECTOR_EMAIL) {
+    const PROTECTED_DIRECTOR_EMAILS = [
+      'devenjhaofficial@gmail.com',
+      'devenjhaoffical@gmail.com',
+      AUTHORIZED_DIRECTOR_EMAIL.toLowerCase(),
+    ];
+
+    if (!currentUser || !PROTECTED_DIRECTOR_EMAILS.includes(currentEmail)) {
       throw new Error('Unauthorized: Only the Director is authorized to permanently delete staff accounts.');
     }
 
     const resolved = await this.resolveStaffDoc(idOrEmployeeId);
-    const employeeId = resolved ? resolved.employeeId : idOrEmployeeId.trim();
-    const staffName = resolved ? resolved.data.fullName : employeeId;
+    const employeeId = (resolved ? resolved.employeeId : idOrEmployeeId.trim()).toUpperCase();
+    let uid = resolved?.data?.uid;
 
-    if (resolved) {
-      // 1. Delete staff document from Firestore
-      await deleteDoc(resolved.ref);
+    const targetEmail = (resolved?.data?.officialEmail || '').trim().toLowerCase();
+    if (
+      PROTECTED_DIRECTOR_EMAILS.includes(targetEmail) ||
+      PROTECTED_DIRECTOR_EMAILS.includes(employeeId.toLowerCase()) ||
+      (uid && uid === currentUser.uid)
+    ) {
+      throw new Error('Security Violation: The Director / Administrator account can never be deleted through staff management.');
+    }
 
-      // 2. Delete linked users/{uid} document so login access is permanently removed
+    if (!uid) {
       try {
         const q = query(collection(db, 'users'), where('employeeId', '==', employeeId));
         const snap = await getDocs(q);
-        for (const uDoc of snap.docs) {
-          await deleteDoc(doc(db, 'users', uDoc.id));
+        if (!snap.empty) {
+          uid = snap.docs[0].id;
         }
-      } catch (userErr) {
-        console.warn('Could not remove users authorization record:', userErr);
-      }
-
-      // 3. Record audit log (Historical attendance, expenses, and payroll are intentionally preserved)
-      try {
-        await addDoc(collection(db, 'auditLogs'), {
-          action: 'STAFF_DELETED',
-          performedBy: currentEmail,
-          targetId: employeeId,
-          details: `Staff account ${staffName} (${employeeId}) permanently deleted by Director. Historical attendance, expenses, and payroll records preserved.`,
-          timestamp: serverTimestamp(),
-        });
-      } catch (auditErr) {
-        console.warn('Audit log write error:', auditErr);
+      } catch (e) {
+        console.warn('Could not query users collection for uid:', e);
       }
     }
 
-    // Sync local storage
-    storageService.deleteStaff(employeeId);
+    // Call secure, trusted backend Cloud Function (deleteStaffAccount) which uses Firebase Admin SDK
+    const deleteFn = httpsCallable<
+      { employeeId: string; uid?: string },
+      { success: boolean; employeeId: string; uid?: string; authDeleted: boolean }
+    >(functions, 'deleteStaffAccount');
+
+    try {
+      const res = await deleteFn({ employeeId, uid });
+
+      // Sync local storage on backend success
+      storageService.deleteStaff(employeeId);
+
+      return {
+        success: true,
+        employeeId,
+        authDeleted: res.data?.authDeleted ?? true,
+      };
+    } catch (err: any) {
+      console.error('deleteStaffAccount backend call failed:', err);
+      const detail = err?.message || 'Backend service failed to process deletion request.';
+      // Under no circumstances do we delete Firestore profiles when backend Auth deletion fails!
+      // This prevents orphan Auth accounts, prevents false reporting of deletion,
+      // and allows the administrator to safely retry without creating inconsistent records.
+      throw new Error(
+        `Failed to delete Firebase Authentication account: ${detail}. The staff profile was NOT deleted. Please verify Cloud Function backend deployment and retry.`
+      );
+    }
   }
 
   /**
-   * Staff updates their own personal address and alternate contact
+   * Staff updates their own personal address and alternate contact (sanitized)
    */
   async updateStaffPersonalProfile(
     employeeId: string,
     partial: { alternateContact?: string; address?: string }
   ): Promise<void> {
     const staffDocRef = doc(db, 'staff', employeeId);
-    await updateDoc(staffDocRef, {
+    const sanitizedPartial = sanitizeFirestorePayload({
       ...partial,
       updatedAt: serverTimestamp(),
     });
+    await updateDoc(staffDocRef, sanitizedPartial);
   }
 
   /**
@@ -382,9 +413,17 @@ export class StaffService {
       staffRef,
       (snapshot) => {
         const staffList: Staff[] = [];
+        const seen = new Set<string>();
         snapshot.forEach((docSnap) => {
-          const item = docSnap.data() as Staff;
-          if (!isDemoStaff(item)) {
+          const data = docSnap.data() as Staff;
+          const canonicalId = (data.employeeId || docSnap.id).trim().toUpperCase();
+          const item: Staff = {
+            ...data,
+            id: data.id || docSnap.id,
+            employeeId: canonicalId,
+          };
+          if (!isDemoStaff(item) && !seen.has(canonicalId)) {
+            seen.add(canonicalId);
             staffList.push(item);
           }
         });
@@ -402,9 +441,17 @@ export class StaffService {
   async getStaffList(): Promise<Staff[]> {
     const snapshot = await getDocs(collection(db, 'staff'));
     const staffList: Staff[] = [];
+    const seen = new Set<string>();
     snapshot.forEach((docSnap) => {
-      const item = docSnap.data() as Staff;
-      if (!isDemoStaff(item)) {
+      const data = docSnap.data() as Staff;
+      const canonicalId = (data.employeeId || docSnap.id).trim().toUpperCase();
+      const item: Staff = {
+        ...data,
+        id: data.id || docSnap.id,
+        employeeId: canonicalId,
+      };
+      if (!isDemoStaff(item) && !seen.has(canonicalId)) {
+        seen.add(canonicalId);
         staffList.push(item);
       }
     });

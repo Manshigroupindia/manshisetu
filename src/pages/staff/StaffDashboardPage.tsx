@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { Link } from 'react-router-dom';
-import { formatDistance, getGoogleMapsUrl } from '../../utils/geoUtils';
+import { formatDistance, getGoogleMapsUrl, getGoogleMapsEmbedUrl } from '../../utils/geoUtils';
 import { getTodayDateString, getCurrentMonthString } from '../../utils/dateUtils';
 import { useAttendanceLocation } from '../../hooks/useAttendanceLocation';
 import { LocationErrorBanner } from '../../components/common/LocationErrorBanner';
@@ -74,7 +74,7 @@ export const StaffDashboardPage: React.FC = () => {
 
   // Today's attendance session for this staff
   const todayRecord = attendance.find(
-    (a) => a.staffId === currentStaff?.id && a.date === todayStr
+    (a) => (a.staffId === currentStaff?.employeeId || a.staffId === currentStaff?.id) && a.date === todayStr
   );
   const dutyStatus = todayRecord?.dutyStatus || 'duty_off';
 
@@ -99,7 +99,7 @@ export const StaffDashboardPage: React.FC = () => {
   // Month attendance summary
   const currentMonthAttendance = attendance.filter((a) => {
     return (
-      a.staffId === currentStaff?.id &&
+      (a.staffId === currentStaff?.employeeId || a.staffId === currentStaff?.id) &&
       a.date.startsWith(currentMonthStr)
     );
   });
@@ -338,6 +338,16 @@ export const StaffDashboardPage: React.FC = () => {
                     <span>Open in Google Maps</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
+
+                  {/* Interactive Google Map Preview */}
+                  <div className="pt-2">
+                    <iframe
+                      title="Check-In Map Preview"
+                      src={getGoogleMapsEmbedUrl(todayRecord.checkInLocation.latitude, todayRecord.checkInLocation.longitude)}
+                      className="w-full h-32 rounded-xl border border-slate-200 dark:border-navy-700 shadow-xs"
+                      loading="lazy"
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="text-xs text-slate-400 italic">No GPS coordinates recorded</div>
@@ -380,6 +390,16 @@ export const StaffDashboardPage: React.FC = () => {
                     <span>Open in Google Maps</span>
                     <ExternalLink className="w-3 h-3" />
                   </a>
+
+                  {/* Interactive Google Map Preview */}
+                  <div className="pt-2">
+                    <iframe
+                      title="Check-Out Map Preview"
+                      src={getGoogleMapsEmbedUrl(todayRecord.checkOutLocation.latitude, todayRecord.checkOutLocation.longitude)}
+                      className="w-full h-32 rounded-xl border border-slate-200 dark:border-navy-700 shadow-xs"
+                      loading="lazy"
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="text-xs text-slate-400 italic">
